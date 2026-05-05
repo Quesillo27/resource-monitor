@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -77,7 +78,12 @@ func (c *Client) post(ctx context.Context, path string, payload any, auth bool, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("server returned %s", resp.Status)
+		bytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		message := strings.TrimSpace(string(bytes))
+		if message == "" {
+			message = resp.Status
+		}
+		return fmt.Errorf("server returned %s: %s", resp.Status, message)
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
