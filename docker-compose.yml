@@ -22,7 +22,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgres://monitor:monitor_pass@postgres:5432/resource_monitor?sslmode=disable}
+      DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD:-monitor_pass}@postgres:5432/${POSTGRES_DB:-resource_monitor}?sslmode=disable
       SERVER_ADDR: ":8080"
     ports:
       - "8080:8080"
