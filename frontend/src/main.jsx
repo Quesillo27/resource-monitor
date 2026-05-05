@@ -5,6 +5,8 @@ import {
   AlertTriangle,
   Copy,
   Cpu,
+  Edit3,
+  Filter,
   HardDrive,
   KeyRound,
   LayoutDashboard,
@@ -14,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  Trash2,
 } from 'lucide-react';
 import './styles.css';
 
@@ -148,36 +151,55 @@ function Dashboard({ api }) {
 
 function Agents({ api, onSelect }) {
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const { data, loading, reload } = useLoad(() => api.get(`/api/agents?q=${encodeURIComponent(query)}`), [query]);
   const agents = data?.agents || [];
+  const filteredAgents = statusFilter === 'all' ? agents : agents.filter((agent) => agent.status === statusFilter);
+  const counts = agents.reduce((acc, agent) => {
+    acc[agent.status] = (acc[agent.status] || 0) + 1;
+    return acc;
+  }, {});
 
   return (
     <section>
       <Header title="Equipos" action={<IconButton icon={RefreshCw} onClick={reload} label="Actualizar" />} />
-      <div className="toolbar">
-        <Search size={18} />
-        <input placeholder="Buscar por nombre o hostname" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="agent-tools">
+        <div className="toolbar">
+          <Search size={18} />
+          <input placeholder="Buscar por nombre o hostname" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </div>
+        <div className="filter-row">
+          <Filter size={18} />
+          {['all', 'online', 'warning', 'critical', 'offline'].map((status) => (
+            <button key={status} className={statusFilter === status ? 'selected' : ''} onClick={() => setStatusFilter(status)}>
+              {status === 'all' ? 'Todos' : status} <span>{status === 'all' ? agents.length : counts[status] || 0}</span>
+            </button>
+          ))}
+        </div>
       </div>
       {loading && <Skeleton />}
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Ultima conexion</th>
+              <th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Ultima metrica</th><th>Ultima conexion</th>
             </tr>
           </thead>
           <tbody>
-            {agents.map((agent) => (
+            {filteredAgents.map((agent) => (
               <tr key={agent.id} onClick={() => onSelect(agent.id)}>
                 <td><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
                 <td><Status status={agent.status} /></td>
                 <td>{agent.os}</td>
                 <td>{percent(agent.cpu_percent)}</td>
                 <td>{percent(agent.memory_used_percent)}</td>
+                <td>{agent.disk_count ?? 0}</td>
+                <td>{agent.active_alerts ?? 0}</td>
+                <td>{date(agent.last_metric_at)}</td>
                 <td>{date(agent.last_seen_at)}</td>
               </tr>
             ))}
-            {!agents.length && <tr><td colSpan="6" className="empty">Sin equipos registrados</td></tr>}
+            {!filteredAgents.length && <tr><td colSpan="9" className="empty">Sin equipos registrados</td></tr>}
           </tbody>
         </table>
       </div>
@@ -197,9 +219,20 @@ function AgentDetail({ api, agentId, onBack }) {
   const agentStatus = data?.agent_status;
   const disks = data?.disks || [];
   const history = data?.history || [];
+  async function renameAgent() {
+    const nextName = window.prompt('Nuevo nombre del equipo', agent?.name || '');
+    if (!nextName || nextName === agent?.name) return;
+    await api.patch(`/api/agents/${agentId}`, { name: nextName });
+    reload();
+  }
+  async function deleteAgent() {
+    if (!window.confirm('Eliminar este equipo y sus metricas historicas?')) return;
+    await api.delete(`/api/agents/${agentId}`);
+    onBack();
+  }
   return (
     <section>
-      <Header title={agent?.name || 'Equipo'} action={<div className="actions"><button onClick={onBack}>Volver</button><IconButton icon={RefreshCw} onClick={reload} label="Actualizar" /></div>} />
+      <Header title={agent?.name || 'Equipo'} action={<div className="actions"><button onClick={onBack}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" /><IconButton icon={Trash2} onClick={deleteAgent} label="Eliminar" /><IconButton icon={RefreshCw} onClick={reload} label="Actualizar" /></div>} />
       {loading && <Skeleton />}
       {agent && (
         <>
@@ -217,11 +250,21 @@ function AgentDetail({ api, agentId, onBack }) {
           </div>
           {agentStatus && (
             <div className="diagnostic-band">
+              <span>Estado API: {agentStatus.status}</span>
               <span>Ultima metrica: {date(agentStatus.last_metric_at)}</span>
+              <span>Ultimo heartbeat: {date(agentStatus.last_seen_at)}</span>
               <span>Alertas activas: {agentStatus.active_alerts}</span>
               <span>Offline despues de: {agentStatus.offline_after_seconds}s</span>
             </div>
           )}
+          <div className="ops-panel">
+            <h2>Operacion del agente</h2>
+            <div className="ops-grid">
+              <code>systemctl status resource-monitor-agent</code>
+              <code>journalctl -u resource-monitor-agent -f</code>
+              <code>resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json</code>
+            </div>
+          </div>
           <div className="chart-band">
             <h2>Historico 24h</h2>
             <HistoryChart points={history} />
@@ -294,8 +337,14 @@ function Enrollment({ api }) {
             <strong>Token valido hasta {date(result.expires_at)}</strong>
             <span>Version: {result.release_version || releaseVersion || 'latest'} - Ejecutar como administrador/root.</span>
           </div>
-          <CommandBlock title="Linux systemd" command={result.linux_install_command || result.install_command} />
-          <CommandBlock title="Windows PowerShell" command={result.windows_install_command || result.install_command} />
+          <CommandBlock
+            title="Linux systemd"
+            command={result.linux_install_command || result.install_command}
+          />
+          <CommandBlock
+            title="Windows PowerShell"
+            command={result.windows_install_command || result.install_command}
+          />
         </div>
       )}
     </section>
@@ -403,6 +452,8 @@ function createApi(token) {
   return {
     get: (path) => request(path, { method: 'GET' }, token),
     post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }, token),
+    patch: (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body) }, token),
+    delete: (path) => request(path, { method: 'DELETE' }, token),
   };
 }
 
