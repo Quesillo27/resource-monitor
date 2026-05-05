@@ -1,0 +1,564 @@
+package store
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"time"
+
+	"resource-monitor/backend/internal/models"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/crypto/bcrypt"
+)
+
+var ErrNotFound = errors.New("not found")
+var ErrUnauthorized = errors.New("unauthorized")
+var ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+type User struct {
+	ID           string
+	Username     string
+	PasswordHash string
+}
+
+type EnrollmentTokenResult struct {
+	ID             string `json:"id"`
+	Token          string `json:"token"`
+	ExpiresAt      string `json:"expires_at"`
+	InstallCommand string `json:"install_command"`
+}
+
+func Open(ctx context.Context, databaseURL string) (*Store, error) {
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return &Store{pool: pool}, nil
+}
+
+func (s *Store) Close() {
+	s.pool.Close()
+}
+
+func (s *Store) EnsureAdmin(ctx context.Context, username, password string) error {
+	var count int
+	if err := s.pool.QueryRow(ctx, "SELECT count(*) FROM users").Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, "INSERT INTO users (username, password_hash) VALUES ($1, $2)", username, string(hash))
+	return err
+}
+
+func (s *Store) AuthenticateUser(ctx context.Context, username, password string) (*User, error) {
+	var user User
+	err := s.pool.QueryRow(ctx, "SELECT id::text, username, password_hash FROM users WHERE username = $1", username).
+		Scan(&user.ID, &user.Username, &user.PasswordHash)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUnauthorized
+	}
+	if err != nil {
+		return nil, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		return nil, ErrUnauthorized
+	}
+	return &user, nil
+}
+
+func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, agentName, installStyle string) (*EnrollmentTokenResult, error) {
+	if ttlHours <= 0 {
+		ttlHours = 24
+	}
+	if name == "" {
+		name = "agent enrollment"
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		return nil, err
+	}
+	expiresAt := time.Now().UTC().Add(time.Duration(ttlHours) * time.Hour)
+	var id string
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO enrollment_tokens (token_hash, name, expires_at, created_by)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id::text
+	`, hashSecret(token), name, expiresAt, userID).Scan(&id)
+	if err != nil {
+		return nil, err
+	}
+
+	return &EnrollmentTokenResult{
+		ID:             id,
+		Token:          token,
+		ExpiresAt:      expiresAt.Format(time.RFC3339),
+		InstallCommand: installCommand(serverURL, token, agentName, installStyle),
+	}, nil
+}
+
+func (s *Store) RegisterAgent(ctx context.Context, req models.AgentRegisterRequest) (*models.AgentAuthResponse, error) {
+	credential, err := randomToken(32)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	var tokenID string
+	err = tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM enrollment_tokens
+		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()
+		FOR UPDATE
+	`, hashSecret(req.EnrollmentToken)).Scan(&tokenID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrInvalidEnrollmentToken
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	name := req.Name
+	if name == "" {
+		name = req.Hostname
+	}
+	var agentID string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO agents (name, hostname, os, arch, uptime_seconds, credential_hash, status, last_seen_at)
+		VALUES ($1, $2, $3, $4, $5, $6, 'online', now())
+		RETURNING id::text
+	`, name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), hashSecret(credential)).Scan(&agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(ctx, "UPDATE enrollment_tokens SET used_at = now() WHERE id = $1", tokenID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &models.AgentAuthResponse{AgentID: agentID, Credential: credential}, nil
+}
+
+func (s *Store) AuthenticateAgent(ctx context.Context, credential string) (string, error) {
+	var agentID string
+	err := s.pool.QueryRow(ctx, "SELECT id::text FROM agents WHERE credential_hash = $1", hashSecret(credential)).Scan(&agentID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrUnauthorized
+	}
+	return agentID, err
+}
+
+func (s *Store) Heartbeat(ctx context.Context, agentID string, req models.HeartbeatRequest) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE agents
+		SET name = COALESCE(NULLIF($2, ''), name),
+		    hostname = COALESCE(NULLIF($3, ''), hostname),
+		    os = COALESCE(NULLIF($4, ''), os),
+		    arch = COALESCE(NULLIF($5, ''), arch),
+		    uptime_seconds = $6,
+		    last_seen_at = now(),
+		    updated_at = now()
+		WHERE id = $1
+	`, agentID, req.Name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds))
+	return err
+}
+
+func (s *Store) InsertMetrics(ctx context.Context, agentID string, req models.MetricsRequest) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var sampleID int64
+	err = tx.QueryRow(ctx, `
+		INSERT INTO metric_samples (agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent).Scan(&sampleID)
+	if err != nil {
+		return err
+	}
+
+	for _, disk := range req.Disks {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO disk_samples
+				(metric_sample_id, agent_id, name, mountpoint, filesystem, total_bytes, used_bytes, free_bytes, used_percent)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`, sampleID, agentID, disk.Name, disk.Mountpoint, disk.Filesystem, int64(disk.TotalBytes), int64(disk.UsedBytes), int64(disk.FreeBytes), disk.UsedPercent)
+		if err != nil {
+			return err
+		}
+	}
+
+	status, activeKeys, err := evaluateAlerts(ctx, tx, agentID, req)
+	if err != nil {
+		return err
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1
+	`, agentID, status); err != nil {
+		return err
+	}
+	if err := resolveRecoveredAlerts(ctx, tx, agentID, activeKeys); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (map[string]any, error) {
+	row := s.pool.QueryRow(ctx, `
+		WITH latest AS (
+		  SELECT DISTINCT ON (agent_id) agent_id, cpu_percent, memory_used_percent
+		  FROM metric_samples
+		  ORDER BY agent_id, captured_at DESC
+		), agent_state AS (
+		  SELECT a.id,
+		         CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
+		              THEN 'offline' ELSE a.status END AS effective_status,
+		         l.cpu_percent,
+		         l.memory_used_percent
+		  FROM agents a
+		  LEFT JOIN latest l ON l.agent_id = a.id
+		), latest_disks AS (
+		  SELECT DISTINCT ON (agent_id, mountpoint) agent_id, mountpoint, used_percent
+		  FROM disk_samples
+		  ORDER BY agent_id, mountpoint, captured_at DESC
+		)
+		SELECT
+		  count(*)::int,
+		  count(*) FILTER (WHERE effective_status = 'online')::int,
+		  count(*) FILTER (WHERE effective_status = 'warning')::int,
+		  count(*) FILTER (WHERE effective_status = 'critical')::int,
+		  count(*) FILTER (WHERE effective_status = 'offline')::int,
+		  COALESCE(avg(cpu_percent), 0)::float8,
+		  COALESCE(avg(memory_used_percent), 0)::float8,
+		  (SELECT count(*)::int FROM alerts WHERE active = true),
+		  (SELECT count(*)::int FROM latest_disks WHERE used_percent >= 90)
+		FROM agent_state
+	`, offlineAfterSeconds)
+
+	var total, online, warning, critical, offline, activeAlerts, criticalDisks int
+	var avgCPU, avgRAM float64
+	if err := row.Scan(&total, &online, &warning, &critical, &offline, &avgCPU, &avgRAM, &activeAlerts, &criticalDisks); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"total_agents":      total,
+		"online_agents":     online,
+		"warning_agents":    warning,
+		"critical_agents":   critical,
+		"offline_agents":    offline,
+		"active_alerts":     activeAlerts,
+		"avg_cpu_percent":   avgCPU,
+		"avg_memory_percent": avgRAM,
+		"critical_disks":    criticalDisks,
+	}, nil
+}
+
+func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search string) ([]models.Agent, error) {
+	rows, err := s.pool.Query(ctx, `
+		WITH latest AS (
+		  SELECT DISTINCT ON (agent_id) agent_id, cpu_percent, memory_used_percent
+		  FROM metric_samples
+		  ORDER BY agent_id, captured_at DESC
+		)
+		SELECT a.id::text, a.name, a.hostname, a.os, a.arch, a.uptime_seconds,
+		       CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
+		            THEN 'offline' ELSE a.status END AS effective_status,
+		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent
+		FROM agents a
+		LEFT JOIN latest l ON l.agent_id = a.id
+		WHERE $2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%'
+		ORDER BY a.last_seen_at DESC NULLS LAST, a.name
+	`, offlineAfterSeconds, search)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	agents := []models.Agent{}
+	for rows.Next() {
+		var agent models.Agent
+		var uptime int64
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent); err != nil {
+			return nil, err
+		}
+		agent.UptimeSeconds = uint64(uptime)
+		agents = append(agents, agent)
+	}
+	return agents, rows.Err()
+}
+
+func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds int) (map[string]any, error) {
+	agents, err := s.ListAgents(ctx, offlineAfterSeconds, "")
+	if err != nil {
+		return nil, err
+	}
+	var agent *models.Agent
+	for i := range agents {
+		if agents[i].ID == id {
+			agent = &agents[i]
+			break
+		}
+	}
+	if agent == nil {
+		return nil, ErrNotFound
+	}
+
+	disks, err := s.latestDisks(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	history, err := s.metricHistory(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"agent": agent, "disks": disks, "history": history}, nil
+}
+
+func (s *Store) ListAlerts(ctx context.Context, activeOnly bool) ([]models.Alert, error) {
+	query := `
+		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
+		       al.active, al.opened_at, al.resolved_at
+		FROM alerts al
+		JOIN agents a ON a.id = al.agent_id
+		WHERE ($1 = false OR al.active = true)
+		ORDER BY al.active DESC, al.opened_at DESC
+	`
+	rows, err := s.pool.Query(ctx, query, activeOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	alerts := []models.Alert{}
+	for rows.Next() {
+		var alert models.Alert
+		if err := rows.Scan(&alert.ID, &alert.AgentID, &alert.AgentName, &alert.Type, &alert.Severity, &alert.Message, &alert.Active, &alert.OpenedAt, &alert.ResolvedAt); err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, alert)
+	}
+	return alerts, rows.Err()
+}
+
+func (s *Store) DeleteOldMetrics(ctx context.Context, days int) error {
+	if days <= 0 {
+		days = 30
+	}
+	_, err := s.pool.Exec(ctx, "DELETE FROM metric_samples WHERE captured_at < now() - ($1::int * interval '1 day')", days)
+	return err
+}
+
+func (s *Store) latestDisks(ctx context.Context, agentID string) ([]models.DiskMetric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (mountpoint)
+		       name, mountpoint, filesystem, total_bytes, used_bytes, free_bytes, used_percent
+		FROM disk_samples
+		WHERE agent_id = $1
+		ORDER BY mountpoint, captured_at DESC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	disks := []models.DiskMetric{}
+	for rows.Next() {
+		var disk models.DiskMetric
+		var total, used, free int64
+		if err := rows.Scan(&disk.Name, &disk.Mountpoint, &disk.Filesystem, &total, &used, &free, &disk.UsedPercent); err != nil {
+			return nil, err
+		}
+		disk.TotalBytes = uint64(total)
+		disk.UsedBytes = uint64(used)
+		disk.FreeBytes = uint64(free)
+		disks = append(disks, disk)
+	}
+	return disks, rows.Err()
+}
+
+func (s *Store) metricHistory(ctx context.Context, agentID string) ([]map[string]any, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT captured_at, cpu_percent, memory_used_percent
+		FROM metric_samples
+		WHERE agent_id = $1 AND captured_at > now() - interval '24 hours'
+		ORDER BY captured_at ASC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	history := []map[string]any{}
+	for rows.Next() {
+		var capturedAt time.Time
+		var cpu, memory float64
+		if err := rows.Scan(&capturedAt, &cpu, &memory); err != nil {
+			return nil, err
+		}
+		history = append(history, map[string]any{
+			"captured_at":         capturedAt,
+			"cpu_percent":         cpu,
+			"memory_used_percent": memory,
+		})
+	}
+	return history, rows.Err()
+}
+
+func evaluateAlerts(ctx context.Context, tx pgx.Tx, agentID string, req models.MetricsRequest) (string, map[string]bool, error) {
+	status := models.StatusOnline
+	activeKeys := map[string]bool{}
+
+	if req.CPUPercent >= 95 {
+		status = models.StatusCritical
+		activeKeys["cpu:"] = true
+		if err := upsertAlert(ctx, tx, agentID, "cpu", "", "critical", fmt.Sprintf("CPU en %.1f%%", req.CPUPercent)); err != nil {
+			return "", nil, err
+		}
+	} else if req.CPUPercent >= 85 {
+		status = maxStatus(status, models.StatusWarning)
+		activeKeys["cpu:"] = true
+		if err := upsertAlert(ctx, tx, agentID, "cpu", "", "warning", fmt.Sprintf("CPU en %.1f%%", req.CPUPercent)); err != nil {
+			return "", nil, err
+		}
+	}
+
+	if req.MemoryUsedPercent >= 95 {
+		status = models.StatusCritical
+		activeKeys["memory:"] = true
+		if err := upsertAlert(ctx, tx, agentID, "memory", "", "critical", fmt.Sprintf("RAM en %.1f%%", req.MemoryUsedPercent)); err != nil {
+			return "", nil, err
+		}
+	} else if req.MemoryUsedPercent >= 85 {
+		status = maxStatus(status, models.StatusWarning)
+		activeKeys["memory:"] = true
+		if err := upsertAlert(ctx, tx, agentID, "memory", "", "warning", fmt.Sprintf("RAM en %.1f%%", req.MemoryUsedPercent)); err != nil {
+			return "", nil, err
+		}
+	}
+
+	for _, disk := range req.Disks {
+		key := disk.Mountpoint
+		if key == "" {
+			key = disk.Name
+		}
+		if disk.UsedPercent >= 90 {
+			status = models.StatusCritical
+			activeKeys["disk:"+key] = true
+			if err := upsertAlert(ctx, tx, agentID, "disk", key, "critical", fmt.Sprintf("Disco %s en %.1f%%", key, disk.UsedPercent)); err != nil {
+				return "", nil, err
+			}
+		} else if disk.UsedPercent >= 80 {
+			status = maxStatus(status, models.StatusWarning)
+			activeKeys["disk:"+key] = true
+			if err := upsertAlert(ctx, tx, agentID, "disk", key, "warning", fmt.Sprintf("Disco %s en %.1f%%", key, disk.UsedPercent)); err != nil {
+				return "", nil, err
+			}
+		}
+	}
+	return status, activeKeys, nil
+}
+
+func upsertAlert(ctx context.Context, tx pgx.Tx, agentID, alertType, resourceKey, severity, message string) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO alerts (agent_id, type, resource_key, severity, message)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (agent_id, type, resource_key) WHERE active = true
+		DO UPDATE SET severity = EXCLUDED.severity, message = EXCLUDED.message, last_seen_at = now()
+	`, agentID, alertType, resourceKey, severity, message)
+	return err
+}
+
+func resolveRecoveredAlerts(ctx context.Context, tx pgx.Tx, agentID string, activeKeys map[string]bool) error {
+	rows, err := tx.Query(ctx, "SELECT id::text, type, resource_key FROM alerts WHERE agent_id = $1 AND active = true", agentID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id, alertType, resourceKey string
+		if err := rows.Scan(&id, &alertType, &resourceKey); err != nil {
+			return err
+		}
+		if !activeKeys[alertType+":"+resourceKey] {
+			ids = append(ids, id)
+		}
+	}
+	if rows.Err() != nil {
+		return rows.Err()
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, "UPDATE alerts SET active = false, resolved_at = now() WHERE id = $1", id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func maxStatus(current, candidate string) string {
+	if current == models.StatusCritical || candidate == models.StatusCritical {
+		return models.StatusCritical
+	}
+	if current == models.StatusWarning || candidate == models.StatusWarning {
+		return models.StatusWarning
+	}
+	return models.StatusOnline
+}
+
+func randomToken(size int) (string, error) {
+	bytes := make([]byte, size)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+func hashSecret(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
+}
+
+func installCommand(serverURL, token, agentName, style string) string {
+	if serverURL == "" {
+		serverURL = "https://monitor.example.com"
+	}
+	nameArg := ""
+	if agentName != "" {
+		nameArg = " --name \"" + agentName + "\""
+	}
+	if style == "windows" {
+		return ".\\resource-monitor-agent.exe install --server-url " + serverURL + " --enrollment-token " + token + nameArg
+	}
+	return "sudo ./resource-monitor-agent install --server-url " + serverURL + " --enrollment-token " + token + nameArg
+}
