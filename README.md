@@ -5,9 +5,10 @@ App autocontenida para monitorear recursos de equipos Windows y Linux con backen
 ## Componentes
 
 - `backend/`: API REST Go con JWT para consola web, registro de agentes, ingesta de metricas y alertas.
-- `agent/`: agente Go con `gopsutil`, comandos `install`, `uninstall`, `run` y `once`.
+- `agent/`: agente Go con `gopsutil`, comandos `install`, `uninstall`, `run`, `once`, `doctor` y `status`.
 - `frontend/`: consola React minimalista para dashboard, equipos, detalle, alta de agentes y alertas.
 - `docker-compose.yml`: PostgreSQL, backend y frontend.
+- `scripts/`: instaladores Linux/Windows para descargar binarios desde GitHub Releases.
 
 ## Puesta en marcha con Docker
 
@@ -45,6 +46,7 @@ El backend crea este usuario solo si la tabla `users` esta vacia.
 - `GET /api/dashboard/summary`
 - `GET /api/agents`
 - `GET /api/agents/:id`
+- `GET /api/agents/:id/status`
 - `POST /api/enrollment-tokens`
 - `GET /api/alerts`
 
@@ -66,25 +68,47 @@ Authorization: Bearer <jwt>
 Authorization: Bearer <agent_credential>
 ```
 
-## Agente
+## Agente con GitHub Releases
 
-Compilar:
+La consola web genera comandos listos para copiar desde **Alta agente**. El flujo recomendado descarga binarios precompilados desde GitHub Releases y no requiere instalar Go en cada equipo.
+
+Linux:
+
+```bash
+curl -fsSL https://github.com/Quesillo27/resource-monitor/releases/latest/download/install-agent.sh | sudo bash -s -- --server-url http://MONITOR:8080 --enrollment-token TOKEN --name servidor-01
+```
+
+Windows PowerShell como administrador:
 
 ```powershell
+iwr https://github.com/Quesillo27/resource-monitor/releases/latest/download/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\install-agent.ps1 -ServerUrl http://MONITOR:8080 -EnrollmentToken TOKEN -Name servidor-01
+```
+
+El instalador:
+
+- Descarga el binario correcto.
+- Instala Linux en `/usr/local/bin/resource-monitor-agent`.
+- Instala Windows en `C:\Program Files\ResourceMonitorAgent\resource-monitor-agent.exe`.
+- Registra el agente con el token.
+- Crea la config local.
+- Instala, habilita, arranca y valida el servicio.
+
+Para que los comandos `latest/download` funcionen, primero crea un release desde GitHub Actions o publica un tag, por ejemplo `v0.2.0`. El workflow `.github/workflows/release.yml` adjunta los binarios y scripts al release.
+
+## Agente manual
+
+Compilar manualmente:
+
+```bash
 cd agent
+go mod tidy
 go build -o resource-monitor-agent ./cmd/agent
 ```
 
-Instalar en Linux:
+Instalar manualmente:
 
 ```bash
-sudo ./resource-monitor-agent install --server-url https://monitor.example.com --enrollment-token TOKEN --name servidor-01
-```
-
-Instalar en Windows PowerShell como administrador:
-
-```powershell
-.\resource-monitor-agent.exe install --server-url https://monitor.example.com --enrollment-token TOKEN --name servidor-01
+sudo ./resource-monitor-agent install --server-url http://MONITOR:8080 --enrollment-token TOKEN --name servidor-01
 ```
 
 Ejecutar en primer plano:
@@ -97,6 +121,13 @@ Enviar una muestra manual:
 
 ```powershell
 .\resource-monitor-agent.exe once --server-url http://localhost:8080 --enrollment-token TOKEN
+```
+
+Diagnostico:
+
+```bash
+resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json
+resource-monitor-agent status --config /etc/resource-monitor-agent/config.json
 ```
 
 Rutas de config por defecto:
