@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Linux agent
+        working-directory: agent
+        run: |
+          mkdir -p ../dist
+          go mod tidy
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/resource-monitor-agent-linux-amd64 ./cmd/agent
+
+      - name: Build Windows agent
+        working-directory: agent
+        run: |
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/resource-monitor-agent-windows-amd64.exe ./cmd/agent
+
+      - name: Build backend
+        working-directory: backend
+        run: |
+          go mod tidy
+          CGO_ENABLED=0 go build -o ../dist/resource-monitor-server-linux-amd64 ./cmd/server
+
+      - name: Add installer scripts
+        run: |
+          cp scripts/install-agent.sh dist/install-agent.sh
+          cp scripts/install-agent.ps1 dist/install-agent.ps1
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'manual-release' }}
+          files: |
+            dist/resource-monitor-agent-linux-amd64
+            dist/resource-monitor-agent-windows-amd64.exe
+            dist/resource-monitor-server-linux-amd64
+            dist/install-agent.sh
+            dist/install-agent.ps1
