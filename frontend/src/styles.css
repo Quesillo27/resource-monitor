@@ -294,6 +294,18 @@ tbody tr:hover {
   padding: 18px;
 }
 
+.diagnostic-band {
+  background: #ffffff;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  color: #56657a;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 14px 16px;
+}
+
 .chart {
   height: 230px;
   width: 100%;
@@ -385,6 +397,25 @@ label input {
   justify-content: space-between;
   margin-top: 18px;
   padding: 16px;
+}
+
+.install-result {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.install-meta {
+  background: #ffffff;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+}
+
+.install-meta span {
+  color: #66758a;
 }
 
 .command-box code {
