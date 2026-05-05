@@ -42,6 +42,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/dashboard/summary", s.dashboardSummary)
 			r.Get("/agents", s.listAgents)
 			r.Get("/agents/{id}", s.agentDetail)
+			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/alerts", s.listAlerts)
 		})
@@ -116,12 +117,25 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, _ := r.Context().Value(userIDKey{}).(string)
-	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.AgentName, req.InstallStyle)
+	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.AgentName, req.InstallStyle, req.ReleaseVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token creation failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.store.AgentStatus(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent status failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
