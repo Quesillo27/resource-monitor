@@ -1,0 +1,11 @@
+.env
+postgres-data/
+dist/
+node_modules/
+coverage/
+*.log
+*.exe
+*.test
+resource-monitor-server
+resource-monitor-agent
+
