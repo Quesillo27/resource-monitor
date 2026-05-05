@@ -176,6 +176,45 @@ h2 {
   width: 100%;
 }
 
+.agent-tools {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.filter-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-row button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #d8e1ec;
+  border-radius: 8px;
+  color: #344255;
+  display: inline-flex;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 11px;
+}
+
+.filter-row button.selected {
+  background: #e8f1fb;
+  border-color: #1864ab;
+  color: #14538e;
+}
+
+.filter-row span {
+  background: #edf2f7;
+  border-radius: 999px;
+  color: #59677a;
+  font-size: 12px;
+  padding: 2px 7px;
+}
+
 .table-wrap {
   background: #ffffff;
   border: 1px solid #dfe6ef;
@@ -185,7 +224,7 @@ h2 {
 
 table {
   border-collapse: collapse;
-  min-width: 780px;
+  min-width: 1040px;
   width: 100%;
 }
 
@@ -304,6 +343,28 @@ tbody tr:hover {
   gap: 12px;
   margin-bottom: 18px;
   padding: 14px 16px;
+}
+
+.ops-panel {
+  background: #ffffff;
+  border: 1px solid #dfe6ef;
+  border-radius: 8px;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.ops-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.ops-grid code {
+  background: #111820;
+  border-radius: 6px;
+  color: #ecf5ff;
+  display: block;
+  overflow-x: auto;
+  padding: 10px 12px;
 }
 
 .chart {
