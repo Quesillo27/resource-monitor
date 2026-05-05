@@ -17,7 +17,7 @@ App autocontenida para monitorear recursos de equipos Windows y Linux con backen
 Copy-Item .env.example .env
 ```
 
-2. Edita `.env` y cambia `JWT_SECRET`, `POSTGRES_PASSWORD` y la contrasena admin.
+2. Edita `.env` y cambia `JWT_SECRET`, `POSTGRES_PASSWORD` y la contrasena admin. Docker Compose arma automaticamente `DATABASE_URL` con esos valores.
 
 3. Levanta servicios:
 
