@@ -186,8 +186,15 @@ function Agents({ api, onSelect }) {
 }
 
 function AgentDetail({ api, agentId, onBack }) {
-  const { data, loading, reload } = useLoad(() => api.get(`/api/agents/${agentId}`), [agentId]);
+  const { data, loading, reload } = useLoad(async () => {
+    const [detail, status] = await Promise.all([
+      api.get(`/api/agents/${agentId}`),
+      api.get(`/api/agents/${agentId}/status`),
+    ]);
+    return { ...detail, agent_status: status };
+  }, [agentId]);
   const agent = data?.agent;
+  const agentStatus = data?.agent_status;
   const disks = data?.disks || [];
   const history = data?.history || [];
   return (
@@ -208,6 +215,13 @@ function AgentDetail({ api, agentId, onBack }) {
             <Kpi icon={MemoryStick} label="RAM" value={percent(agent.memory_used_percent)} />
             <Kpi icon={HardDrive} label="Discos" value={disks.length} />
           </div>
+          {agentStatus && (
+            <div className="diagnostic-band">
+              <span>Ultima metrica: {date(agentStatus.last_metric_at)}</span>
+              <span>Alertas activas: {agentStatus.active_alerts}</span>
+              <span>Offline despues de: {agentStatus.offline_after_seconds}s</span>
+            </div>
+          )}
           <div className="chart-band">
             <h2>Historico 24h</h2>
             <HistoryChart points={history} />
@@ -239,6 +253,7 @@ function Enrollment({ api }) {
   const [serverUrl, setServerUrl] = useState(API_BASE);
   const [agentName, setAgentName] = useState('');
   const [installStyle, setInstallStyle] = useState('linux');
+  const [releaseVersion, setReleaseVersion] = useState('latest');
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -252,6 +267,7 @@ function Enrollment({ api }) {
         server_url: serverUrl,
         agent_name: agentName,
         install_style: installStyle,
+        release_version: releaseVersion,
       });
       setResult(data);
     } finally {
@@ -265,6 +281,7 @@ function Enrollment({ api }) {
       <form className="enroll-form" onSubmit={createToken}>
         <label>URL del servidor<input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} /></label>
         <label>Nombre del equipo<input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="Opcional" /></label>
+        <label>Version del agente<input value={releaseVersion} onChange={(e) => setReleaseVersion(e.target.value)} placeholder="latest" /></label>
         <div className="segmented">
           <button type="button" className={installStyle === 'linux' ? 'selected' : ''} onClick={() => setInstallStyle('linux')}>Linux</button>
           <button type="button" className={installStyle === 'windows' ? 'selected' : ''} onClick={() => setInstallStyle('windows')}>Windows</button>
@@ -272,15 +289,28 @@ function Enrollment({ api }) {
         <button className="primary" disabled={loading}>{loading ? 'Generando...' : 'Generar token'}</button>
       </form>
       {result && (
-        <div className="command-box">
-          <div>
-            <span>Token valido hasta {date(result.expires_at)}</span>
-            <code>{result.install_command}</code>
+        <div className="install-result">
+          <div className="install-meta">
+            <strong>Token valido hasta {date(result.expires_at)}</strong>
+            <span>Version: {result.release_version || releaseVersion || 'latest'} - Ejecutar como administrador/root.</span>
           </div>
-          <IconButton icon={Copy} label="Copiar" onClick={() => navigator.clipboard?.writeText(result.install_command)} />
+          <CommandBlock title="Linux systemd" command={result.linux_install_command || result.install_command} />
+          <CommandBlock title="Windows PowerShell" command={result.windows_install_command || result.install_command} />
         </div>
       )}
     </section>
+  );
+}
+
+function CommandBlock({ title, command }) {
+  return (
+    <div className="command-box">
+      <div>
+        <span>{title}</span>
+        <code>{command}</code>
+      </div>
+      <IconButton icon={Copy} label={`Copiar ${title}`} onClick={() => navigator.clipboard?.writeText(command)} />
+    </div>
   );
 }
 
