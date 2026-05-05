@@ -302,16 +302,32 @@ func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (
 func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search string) ([]models.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH latest AS (
-		  SELECT DISTINCT ON (agent_id) agent_id, cpu_percent, memory_used_percent
+		  SELECT DISTINCT ON (agent_id) agent_id, captured_at, cpu_percent, memory_used_percent
 		  FROM metric_samples
 		  ORDER BY agent_id, captured_at DESC
+		), latest_disks AS (
+		  SELECT DISTINCT ON (agent_id, mountpoint) agent_id, mountpoint
+		  FROM disk_samples
+		  ORDER BY agent_id, mountpoint, captured_at DESC
+		), alert_counts AS (
+		  SELECT agent_id, count(*)::int AS active_alerts
+		  FROM alerts
+		  WHERE active = true
+		  GROUP BY agent_id
+		), disk_counts AS (
+		  SELECT agent_id, count(*)::int AS disk_count
+		  FROM latest_disks
+		  GROUP BY agent_id
 		)
 		SELECT a.id::text, a.name, a.hostname, a.os, a.arch, a.uptime_seconds,
 		       CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
 		            THEN 'offline' ELSE a.status END AS effective_status,
-		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent
+		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent, l.captured_at,
+		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0)
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
+		LEFT JOIN alert_counts ac ON ac.agent_id = a.id
+		LEFT JOIN disk_counts dc ON dc.agent_id = a.id
 		WHERE $2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%'
 		ORDER BY a.last_seen_at DESC NULLS LAST, a.name
 	`, offlineAfterSeconds, search)
@@ -324,7 +340,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 	for rows.Next() {
 		var agent models.Agent
 		var uptime int64
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount); err != nil {
 			return nil, err
 		}
 		agent.UptimeSeconds = uint64(uptime)
@@ -358,6 +374,31 @@ func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds 
 		return nil, err
 	}
 	return map[string]any{"agent": agent, "disks": disks, "history": history}, nil
+}
+
+func (s *Store) UpdateAgentName(ctx context.Context, id, name string) error {
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("agent name is required")
+	}
+	tag, err := s.pool.Exec(ctx, "UPDATE agents SET name = $2, updated_at = now() WHERE id = $1", id, strings.TrimSpace(name))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteAgent(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, "DELETE FROM agents WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) AgentStatus(ctx context.Context, id string, offlineAfterSeconds int) (map[string]any, error) {
@@ -403,15 +444,15 @@ func (s *Store) AgentStatus(ctx context.Context, id string, offlineAfterSeconds 
 		return nil, err
 	}
 	return map[string]any{
-		"agent_id":              agentID,
-		"name":                  name,
-		"status":                status,
-		"is_offline":            status == models.StatusOffline,
-		"last_seen_at":          lastSeenAt,
-		"last_metric_at":        lastMetricAt,
-		"cpu_percent":           lastCPU,
-		"memory_used_percent":   lastMemory,
-		"active_alerts":         activeAlerts,
+		"agent_id":             agentID,
+		"name":                 name,
+		"status":               status,
+		"is_offline":           status == models.StatusOffline,
+		"last_seen_at":         lastSeenAt,
+		"last_metric_at":       lastMetricAt,
+		"cpu_percent":          lastCPU,
+		"memory_used_percent":  lastMemory,
+		"active_alerts":        activeAlerts,
 		"offline_after_seconds": offlineAfterSeconds,
 	}, nil
 }
