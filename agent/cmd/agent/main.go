@@ -4,11 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -31,10 +34,16 @@ func main() {
 		uninstallCmd(os.Args[2:])
 	case "service":
 		serviceCmd(os.Args[2:])
+	case "install-service":
+		installServiceCmd(os.Args[2:])
 	case "run":
 		runCmd(os.Args[2:])
 	case "once":
 		onceCmd(os.Args[2:])
+	case "doctor":
+		doctorCmd(os.Args[2:])
+	case "status":
+		statusCmd(os.Args[2:])
 	default:
 		runCmd(os.Args[1:])
 	}
@@ -66,10 +75,15 @@ func installCmd(args []string) {
 		log.Fatalf("save config: %v", err)
 	}
 
-	if err := agentservice.Install(path); err != nil {
+	targetPath, err := ensureInstalledBinary()
+	if err != nil {
+		log.Fatalf("install binary: %v", err)
+	}
+	if err := runInstallService(targetPath, path); err != nil {
 		log.Fatalf("install service: %v", err)
 	}
 	fmt.Printf("resource monitor agent installed with config %s\n", path)
+	fmt.Printf("binary installed at %s\n", targetPath)
 }
 
 func uninstallCmd(args []string) {
@@ -92,6 +106,17 @@ func serviceCmd(args []string) {
 	}
 	if err := agentservice.Run(*configPath); err != nil {
 		log.Fatalf("run service: %v", err)
+	}
+}
+
+func installServiceCmd(args []string) {
+	fs := flag.NewFlagSet("install-service", flag.ExitOnError)
+	configPath := fs.String("config", config.DefaultServiceConfigPath(), "config file path")
+	if err := fs.Parse(args); err != nil {
+		log.Fatal(err)
+	}
+	if err := agentservice.Install(*configPath); err != nil {
+		log.Fatalf("install service: %v", err)
 	}
 }
 
@@ -134,6 +159,47 @@ func onceCmd(args []string) {
 		log.Fatal(err)
 	}
 	fmt.Println("metrics sent")
+}
+
+func statusCmd(args []string) {
+	fs := flag.NewFlagSet("status", flag.ExitOnError)
+	configPath := fs.String("config", config.DefaultServiceConfigPath(), "config file path")
+	if err := fs.Parse(args); err != nil {
+		log.Fatal(err)
+	}
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	status, err := agentservice.Status(*configPath)
+	if err != nil {
+		fmt.Printf("service_status=unknown error=%v\n", err)
+	} else {
+		fmt.Printf("service_status=%v\n", status)
+	}
+	fmt.Printf("config=%s\nserver_url=%s\nagent_id=%s\nname=%s\ninterval_seconds=%d\n", *configPath, cfg.ServerURL, cfg.AgentID, cfg.Name, cfg.IntervalSeconds)
+}
+
+func doctorCmd(args []string) {
+	fs, cfg := commonFlags("doctor")
+	if err := fs.Parse(args); err != nil {
+		log.Fatal(err)
+	}
+	loaded, err := config.LoadWithOverrides(*cfg)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	if loaded.ConfigPath == "" {
+		loaded.ConfigPath = config.DefaultServiceConfigPath()
+	}
+	fmt.Printf("config=%s\nserver_url=%s\n", loaded.ConfigPath, loaded.ServerURL)
+	if loaded.Credential == "" && loaded.EnrollmentToken == "" {
+		log.Fatal("missing credential or enrollment token")
+	}
+	if err := sendOnce(context.Background(), loaded); err != nil {
+		log.Fatalf("send test failed: %v", err)
+	}
+	fmt.Println("send test ok")
 }
 
 func commonFlags(name string) (*flag.FlagSet, *config.Config) {
@@ -185,11 +251,16 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	if err := api.Heartbeat(ctx, info); err != nil {
 		return err
 	}
+	log.Printf("heartbeat sent for %s", info.Name)
 	metrics, err := collector.Collect(ctx)
 	if err != nil {
 		return err
 	}
-	return api.SendMetrics(ctx, metrics)
+	if err := api.SendMetrics(ctx, metrics); err != nil {
+		return err
+	}
+	log.Printf("metrics sent cpu=%.1f memory=%.1f disks=%d", metrics.CPUPercent, metrics.MemoryUsedPercent, len(metrics.Disks))
+	return nil
 }
 
 func registerAndSave(cfg *config.Config, path string) error {
@@ -221,6 +292,71 @@ func defaultConfigForRun() string {
 		dir = "."
 	}
 	return filepath.Join(dir, "resource-monitor-agent", "config.json")
+}
+
+func ensureInstalledBinary() (string, error) {
+	source, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	source, _ = filepath.Abs(source)
+	target := config.DefaultInstallPath()
+	target, _ = filepath.Abs(target)
+	if samePath(source, target) {
+		return target, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", err
+	}
+	if err := copyFile(source, target); err != nil {
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(target, 0o755); err != nil {
+			return "", err
+		}
+	}
+	return target, nil
+}
+
+func runInstallService(binaryPath, configPath string) error {
+	current, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	current, _ = filepath.Abs(current)
+	binaryPath, _ = filepath.Abs(binaryPath)
+	if samePath(current, binaryPath) {
+		return agentservice.Install(configPath)
+	}
+	cmd := exec.Command(binaryPath, "install-service", "--config", configPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func copyFile(source, target string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
+}
+
+func samePath(left, right string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }
 
 func init() {
