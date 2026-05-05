@@ -24,6 +24,10 @@ func Install(configPath string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := svc.Status(); err == nil {
+		_ = svc.Stop()
+		_ = svc.Uninstall()
+	}
 	return svc.Install()
 }
 
@@ -94,11 +98,16 @@ func send(ctx context.Context, cfg config.Config) error {
 	if err := api.Heartbeat(ctx, info); err != nil {
 		return err
 	}
+	log.Printf("heartbeat sent for %s", info.Name)
 	metrics, err := collector.Collect(ctx)
 	if err != nil {
 		return err
 	}
-	return api.SendMetrics(ctx, metrics)
+	if err := api.SendMetrics(ctx, metrics); err != nil {
+		return err
+	}
+	log.Printf("metrics sent cpu=%.1f memory=%.1f disks=%d", metrics.CPUPercent, metrics.MemoryUsedPercent, len(metrics.Disks))
+	return nil
 }
 
 func serviceConfig(configPath string) *service.Config {
@@ -108,4 +117,12 @@ func serviceConfig(configPath string) *service.Config {
 		Description: "Collects CPU, memory, disk and host metrics for Resource Monitor.",
 		Arguments:   []string{"service", "--config", configPath},
 	}
+}
+
+func Status(configPath string) (service.Status, error) {
+	svc, err := service.New(&program{configPath: configPath}, serviceConfig(configPath))
+	if err != nil {
+		return service.StatusUnknown, err
+	}
+	return svc.Status()
 }
