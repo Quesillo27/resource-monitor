@@ -15,11 +15,12 @@ type LoginRequest struct {
 }
 
 type EnrollmentTokenRequest struct {
-	Name         string `json:"name"`
-	TTLHours     int    `json:"ttl_hours"`
-	ServerURL    string `json:"server_url"`
-	AgentName    string `json:"agent_name"`
-	InstallStyle string `json:"install_style"`
+	Name           string `json:"name"`
+	TTLHours       int    `json:"ttl_hours"`
+	ServerURL      string `json:"server_url"`
+	AgentName      string `json:"agent_name"`
+	InstallStyle   string `json:"install_style"`
+	ReleaseVersion string `json:"release_version"`
 }
 
 type AgentRegisterRequest struct {
