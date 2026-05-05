@@ -59,10 +59,10 @@ func installCmd(args []string) {
 	cfg.ConfigPath = path
 
 	if cfg.Credential == "" && cfg.EnrollmentToken != "" {
-		if err := registerAndSave(&cfg, path); err != nil {
+		if err := registerAndSave(cfg, path); err != nil {
 			log.Fatalf("register agent: %v", err)
 		}
-	} else if err := config.Save(path, cfg); err != nil {
+	} else if err := config.Save(path, *cfg); err != nil {
 		log.Fatalf("save config: %v", err)
 	}
 
@@ -101,7 +101,7 @@ func runCmd(args []string) {
 		log.Fatal(err)
 	}
 
-	loaded, err := config.LoadWithOverrides(cfg)
+	loaded, err := config.LoadWithOverrides(*cfg)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
@@ -121,7 +121,7 @@ func onceCmd(args []string) {
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
-	loaded, err := config.LoadWithOverrides(cfg)
+	loaded, err := config.LoadWithOverrides(*cfg)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
@@ -136,8 +136,8 @@ func onceCmd(args []string) {
 	fmt.Println("metrics sent")
 }
 
-func commonFlags(name string) (*flag.FlagSet, config.Config) {
-	var cfg config.Config
+func commonFlags(name string) (*flag.FlagSet, *config.Config) {
+	cfg := &config.Config{}
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
 	fs.StringVar(&cfg.ConfigPath, "config", "", "config file path")
 	fs.StringVar(&cfg.ServerURL, "server-url", "", "central server URL")
