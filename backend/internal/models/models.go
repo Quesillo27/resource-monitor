@@ -23,6 +23,10 @@ type EnrollmentTokenRequest struct {
 	ReleaseVersion string `json:"release_version"`
 }
 
+type AgentUpdateRequest struct {
+	Name string `json:"name"`
+}
+
 type AgentRegisterRequest struct {
 	EnrollmentToken string `json:"enrollment_token"`
 	Name            string `json:"name"`
@@ -75,6 +79,9 @@ type Agent struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	CPUPercent    *float64    `json:"cpu_percent,omitempty"`
 	MemoryPercent *float64    `json:"memory_used_percent,omitempty"`
+	LastMetricAt  *time.Time  `json:"last_metric_at,omitempty"`
+	ActiveAlerts  int         `json:"active_alerts"`
+	DiskCount     int         `json:"disk_count"`
 }
 
 type Alert struct {
