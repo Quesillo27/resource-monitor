@@ -67,10 +67,24 @@ func installCmd(args []string) {
 	}
 	cfg.ConfigPath = path
 
+	existing, err := config.Load(path)
+	if err == nil {
+		if cfg.Credential == "" {
+			cfg.Credential = existing.Credential
+		}
+		if cfg.AgentID == "" {
+			cfg.AgentID = existing.AgentID
+		}
+		if cfg.Name == "" {
+			cfg.Name = existing.Name
+		}
+	}
 	if cfg.Credential == "" && cfg.EnrollmentToken != "" {
 		if err := registerAndSave(cfg, path); err != nil {
 			log.Fatalf("register agent: %v", err)
 		}
+	} else if cfg.Credential == "" {
+		log.Fatal("missing existing credential or --enrollment-token")
 	} else if err := config.Save(path, *cfg); err != nil {
 		log.Fatalf("save config: %v", err)
 	}
