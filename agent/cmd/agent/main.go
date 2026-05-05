@@ -228,14 +228,30 @@ func runLoop(ctx context.Context, cfg config.Config) error {
 	defer ticker.Stop()
 
 	for {
-		if err := sendOnce(ctx, cfg); err != nil {
-			log.Printf("send metrics failed: %v", err)
-		}
+		sendOnceWithRetry(ctx, cfg)
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
 		}
+	}
+}
+
+func sendOnceWithRetry(ctx context.Context, cfg config.Config) {
+	delays := []time.Duration{0, 5 * time.Second, 15 * time.Second}
+	for attempt, delay := range delays {
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+		if err := sendOnce(ctx, cfg); err != nil {
+			log.Printf("send metrics failed attempt=%d/%d: %v", attempt+1, len(delays), err)
+			continue
+		}
+		return
 	}
 }
 
