@@ -93,3 +93,14 @@ func DefaultServiceConfigPath() string {
 	}
 	return "/etc/resource-monitor-agent/config.json"
 }
+
+func DefaultInstallPath() string {
+	if runtime.GOOS == "windows" {
+		programFiles := os.Getenv("ProgramFiles")
+		if programFiles == "" {
+			programFiles = `C:\Program Files`
+		}
+		return filepath.Join(programFiles, "ResourceMonitorAgent", "resource-monitor-agent.exe")
+	}
+	return "/usr/local/bin/resource-monitor-agent"
+}
