@@ -43,6 +43,8 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents", s.listAgents)
 			r.Get("/agents/{id}", s.agentDetail)
 			r.Get("/agents/{id}/status", s.agentStatus)
+			r.Patch("/agents/{id}", s.updateAgent)
+			r.Delete("/agents/{id}", s.deleteAgent)
 			r.Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/alerts", s.listAlerts)
 		})
@@ -109,6 +111,36 @@ func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
+	var req models.AgentUpdateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	err := s.store.UpdateAgentName(r.Context(), chi.URLParam(r, "id"), req.Name)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) deleteAgent(w http.ResponseWriter, r *http.Request) {
+	err := s.store.DeleteAgent(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "delete agent failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) createEnrollmentToken(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +248,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
