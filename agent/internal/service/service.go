@@ -28,7 +28,10 @@ func Install(configPath string) error {
 		_ = svc.Stop()
 		_ = svc.Uninstall()
 	}
-	return svc.Install()
+	if err := svc.Install(); err != nil {
+		return err
+	}
+	return svc.Start()
 }
 
 func Uninstall(configPath string) error {
@@ -75,14 +78,30 @@ func (p *program) run(ctx context.Context) {
 	defer ticker.Stop()
 
 	for {
-		if err := send(ctx, cfg); err != nil {
-			log.Printf("send metrics failed: %v", err)
-		}
+		sendWithRetry(ctx, cfg)
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
+	}
+}
+
+func sendWithRetry(ctx context.Context, cfg config.Config) {
+	delays := []time.Duration{0, 5 * time.Second, 15 * time.Second}
+	for attempt, delay := range delays {
+		if delay > 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+		}
+		if err := send(ctx, cfg); err != nil {
+			log.Printf("send metrics failed attempt=%d/%d: %v", attempt+1, len(delays), err)
+			continue
+		}
+		return
 	}
 }
 
