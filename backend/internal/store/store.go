@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"resource-monitor/backend/internal/models"
@@ -32,10 +33,13 @@ type User struct {
 }
 
 type EnrollmentTokenResult struct {
-	ID             string `json:"id"`
-	Token          string `json:"token"`
-	ExpiresAt      string `json:"expires_at"`
-	InstallCommand string `json:"install_command"`
+	ID                    string `json:"id"`
+	Token                 string `json:"token"`
+	ExpiresAt             string `json:"expires_at"`
+	InstallCommand        string `json:"install_command"`
+	LinuxInstallCommand   string `json:"linux_install_command"`
+	WindowsInstallCommand string `json:"windows_install_command"`
+	ReleaseVersion        string `json:"release_version"`
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
@@ -86,7 +90,7 @@ func (s *Store) AuthenticateUser(ctx context.Context, username, password string)
 	return &user, nil
 }
 
-func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, agentName, installStyle string) (*EnrollmentTokenResult, error) {
+func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, agentName, installStyle, releaseVersion string) (*EnrollmentTokenResult, error) {
 	if ttlHours <= 0 {
 		ttlHours = 24
 	}
@@ -108,11 +112,23 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, 
 		return nil, err
 	}
 
+	if releaseVersion == "" {
+		releaseVersion = "latest"
+	}
+	linuxCommand := installCommand(serverURL, token, agentName, "linux", releaseVersion)
+	windowsCommand := installCommand(serverURL, token, agentName, "windows", releaseVersion)
+	resultCommand := linuxCommand
+	if installStyle == "windows" {
+		resultCommand = windowsCommand
+	}
 	return &EnrollmentTokenResult{
-		ID:             id,
-		Token:          token,
-		ExpiresAt:      expiresAt.Format(time.RFC3339),
-		InstallCommand: installCommand(serverURL, token, agentName, installStyle),
+		ID:                    id,
+		Token:                 token,
+		ExpiresAt:             expiresAt.Format(time.RFC3339),
+		InstallCommand:        resultCommand,
+		LinuxInstallCommand:   linuxCommand,
+		WindowsInstallCommand: windowsCommand,
+		ReleaseVersion:        releaseVersion,
 	}, nil
 }
 
@@ -344,6 +360,62 @@ func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds 
 	return map[string]any{"agent": agent, "disks": disks, "history": history}, nil
 }
 
+func (s *Store) AgentStatus(ctx context.Context, id string, offlineAfterSeconds int) (map[string]any, error) {
+	var agentID, name, status string
+	var lastSeenAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT id::text, name,
+		       CASE WHEN last_seen_at IS NULL OR last_seen_at < now() - ($2::int * interval '1 second')
+		            THEN 'offline' ELSE status END AS effective_status,
+		       last_seen_at
+		FROM agents
+		WHERE id = $1
+	`, id, offlineAfterSeconds).Scan(&agentID, &name, &status, &lastSeenAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var capturedAt time.Time
+	var cpu, memory float64
+	var lastMetricAt *time.Time
+	var lastCPU, lastMemory *float64
+	err = s.pool.QueryRow(ctx, `
+		SELECT captured_at, cpu_percent, memory_used_percent
+		FROM metric_samples
+		WHERE agent_id = $1
+		ORDER BY captured_at DESC
+		LIMIT 1
+	`, id).Scan(&capturedAt, &cpu, &memory)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if err == nil {
+		lastMetricAt = &capturedAt
+		lastCPU = &cpu
+		lastMemory = &memory
+	}
+
+	var activeAlerts int
+	if err := s.pool.QueryRow(ctx, "SELECT count(*)::int FROM alerts WHERE agent_id = $1 AND active = true", id).Scan(&activeAlerts); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"agent_id":              agentID,
+		"name":                  name,
+		"status":                status,
+		"is_offline":            status == models.StatusOffline,
+		"last_seen_at":          lastSeenAt,
+		"last_metric_at":        lastMetricAt,
+		"cpu_percent":           lastCPU,
+		"memory_used_percent":   lastMemory,
+		"active_alerts":         activeAlerts,
+		"offline_after_seconds": offlineAfterSeconds,
+	}, nil
+}
+
 func (s *Store) ListAlerts(ctx context.Context, activeOnly bool) ([]models.Alert, error) {
 	query := `
 		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
@@ -549,16 +621,26 @@ func hashSecret(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func installCommand(serverURL, token, agentName, style string) string {
+func installCommand(serverURL, token, agentName, style, releaseVersion string) string {
 	if serverURL == "" {
 		serverURL = "https://monitor.example.com"
+	}
+	if releaseVersion == "" {
+		releaseVersion = "latest"
 	}
 	nameArg := ""
 	if agentName != "" {
 		nameArg = " --name \"" + agentName + "\""
 	}
-	if style == "windows" {
-		return ".\\resource-monitor-agent.exe install --server-url " + serverURL + " --enrollment-token " + token + nameArg
+	releasePath := "latest"
+	if releaseVersion != "latest" {
+		releasePath = "download/" + releaseVersion
+	} else {
+		releasePath = "latest/download"
 	}
-	return "sudo ./resource-monitor-agent install --server-url " + serverURL + " --enrollment-token " + token + nameArg
+	base := "https://github.com/Quesillo27/resource-monitor/releases/" + releasePath
+	if style == "windows" {
+		return "iwr " + base + "/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ")
+	}
+	return "curl -fsSL " + base + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg
 }
