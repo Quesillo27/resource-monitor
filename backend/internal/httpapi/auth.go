@@ -1,0 +1,89 @@
+package httpapi
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"time"
+
+	"resource-monitor/backend/internal/store"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+type userIDKey struct{}
+type agentIDKey struct{}
+
+type claims struct {
+	UserID   string `json:"uid"`
+	Username string `json:"username"`
+	jwt.RegisteredClaims
+}
+
+func (s *Server) issueJWT(user *store.User) (string, error) {
+	now := time.Now()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
+		UserID:   user.ID,
+		Username: user.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   user.ID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(12 * time.Hour)),
+		},
+	})
+	return token.SignedString([]byte(s.cfg.JWTSecret))
+}
+
+func (s *Server) requireUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := bearerToken(r)
+		if raw == "" {
+			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			return
+		}
+		parsed, err := jwt.ParseWithClaims(raw, &claims{}, func(token *jwt.Token) (any, error) {
+			return []byte(s.cfg.JWTSecret), nil
+		}, jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}))
+		if err != nil || !parsed.Valid {
+			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			return
+		}
+		c, ok := parsed.Claims.(*claims)
+		if !ok || c.UserID == "" {
+			writeError(w, http.StatusUnauthorized, "invalid bearer token")
+			return
+		}
+		ctx := context.WithValue(r.Context(), userIDKey{}, c.UserID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) requireAgent(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := bearerToken(r)
+		if raw == "" {
+			writeError(w, http.StatusUnauthorized, "missing agent credential")
+			return
+		}
+		agentID, err := s.store.AuthenticateAgent(r.Context(), raw)
+		if errors.Is(err, store.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "invalid agent credential")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "agent auth failed")
+			return
+		}
+		ctx := context.WithValue(r.Context(), agentIDKey{}, agentID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func bearerToken(r *http.Request) string {
+	value := r.Header.Get("Authorization")
+	if !strings.HasPrefix(strings.ToLower(value), "bearer ") {
+		return ""
+	}
+	return strings.TrimSpace(value[7:])
+}
