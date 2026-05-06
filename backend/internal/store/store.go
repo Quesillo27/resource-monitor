@@ -680,8 +680,12 @@ func installCommand(serverURL, token, agentName, style, releaseVersion string) s
 		releasePath = "latest/download"
 	}
 	base := "https://github.com/Quesillo27/resource-monitor/releases/" + releasePath
-	if style == "windows" {
-		return "iwr " + base + "/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ")
+	scriptBase := base
+	if releaseVersion == "latest" {
+		scriptBase = "https://raw.githubusercontent.com/Quesillo27/resource-monitor/main/scripts"
 	}
-	return "curl -fsSL " + base + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg
+	if style == "windows" {
+		return "iwr " + scriptBase + "/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ")
+	}
+	return "curl -fsSL " + scriptBase + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg
 }
