@@ -36,6 +36,33 @@ function lineValue(pointY, maxValue) {
   return ratio * maxValue;
 }
 
+function svgPointFromMouse(svg, event) {
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  return point.matrixTransform(svg.getScreenCTM().inverse());
+}
+
+function clientPointFromSvg(svg, x, y) {
+  const point = svg.createSVGPoint();
+  point.x = x;
+  point.y = y;
+  return point.matrixTransform(svg.getScreenCTM());
+}
+
+function nearestPointIndex(points, x) {
+  let closestIndex = 0;
+  let closestDistance = Infinity;
+  for (let index = 0; index < points.numberOfItems; index += 1) {
+    const distance = Math.abs(points.getItem(index).x - x);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestIndex = index;
+    }
+  }
+  return closestIndex;
+}
+
 function enhancePanel(panel) {
   if (panel.getAttribute(ENHANCED_ATTR) === '1') return;
   const svg = panel.querySelector('svg.chart');
@@ -53,27 +80,33 @@ function enhancePanel(panel) {
   panel.append(cursor, tooltip);
 
   svg.addEventListener('mousemove', (event) => {
-    const rect = svg.getBoundingClientRect();
-    const xRatio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const points = polylines[0].points;
-    if (!points?.numberOfItems) return;
-    const index = Math.round(xRatio * (points.numberOfItems - 1));
-    const x = points.getItem(index).x;
-    const left = (x / 100) * rect.width + (svg.offsetLeft || 0);
+    if (!points?.numberOfItems || !svg.getScreenCTM()) return;
+
+    const svgMouse = svgPointFromMouse(svg, event);
+    const index = nearestPointIndex(points, svgMouse.x);
+    const point = points.getItem(index);
+    const clientPoint = clientPointFromSvg(svg, point.x, point.y);
+    const panelRect = panel.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    const left = clientPoint.x - panelRect.left;
+
     cursor.style.display = 'block';
     cursor.style.left = `${left}px`;
+    cursor.style.top = `${svgRect.top - panelRect.top}px`;
+    cursor.style.height = `${svgRect.height}px`;
 
     const rows = polylines.map((line, lineIndex) => {
-      const point = line.points.getItem(index);
-      const value = lineValue(point.y, scale.value);
+      const linePoint = line.points.getItem(index);
+      const value = lineValue(linePoint.y, scale.value);
       const color = colorFor(panel, lineIndex, line);
       return `<span><i style="background:${color}"></i>${labelFor(panel, lineIndex)}<b>${formatValue(value, scale.unit)}</b></span>`;
     }).join('');
 
     tooltip.innerHTML = `<strong>Punto ${index + 1}</strong>${rows}`;
     tooltip.style.display = 'grid';
-    tooltip.style.left = `${Math.min(Math.max(left, 110), rect.width - 110)}px`;
-    tooltip.style.top = `${Math.max(72, svg.offsetTop + 18)}px`;
+    tooltip.style.left = `${Math.min(Math.max(left, 115), panelRect.width - 115)}px`;
+    tooltip.style.top = `${Math.max(70, svgRect.top - panelRect.top + 14)}px`;
   });
 
   svg.addEventListener('mouseleave', () => {
