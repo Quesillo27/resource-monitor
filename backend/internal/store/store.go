@@ -8,6 +8,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -51,11 +53,61 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return &Store{pool: pool}, nil
+	store := &Store{pool: pool}
+	if err := store.ensureRuntimeSchema(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return store, nil
 }
 
 func (s *Store) Close() {
 	s.pool.Close()
+}
+
+func (s *Store) ensureRuntimeSchema(ctx context.Context) error {
+	statements := []string{
+		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_total_bytes BIGINT NOT NULL DEFAULT 0",
+		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_bytes BIGINT NOT NULL DEFAULT 0",
+		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
+		`CREATE TABLE IF NOT EXISTS network_samples (
+			id BIGSERIAL PRIMARY KEY,
+			metric_sample_id BIGINT NOT NULL REFERENCES metric_samples(id) ON DELETE CASCADE,
+			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			name TEXT NOT NULL,
+			bytes_sent BIGINT NOT NULL,
+			bytes_recv BIGINT NOT NULL,
+			up BOOLEAN NOT NULL DEFAULT false
+		)`,
+		"CREATE INDEX IF NOT EXISTS network_samples_agent_time_idx ON network_samples(agent_id, captured_at DESC)",
+		`CREATE TABLE IF NOT EXISTS process_samples (
+			id BIGSERIAL PRIMARY KEY,
+			metric_sample_id BIGINT NOT NULL REFERENCES metric_samples(id) ON DELETE CASCADE,
+			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			pid INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			cpu_percent DOUBLE PRECISION NOT NULL,
+			memory_percent DOUBLE PRECISION NOT NULL
+		)`,
+		"CREATE INDEX IF NOT EXISTS process_samples_agent_time_idx ON process_samples(agent_id, captured_at DESC)",
+		`CREATE TABLE IF NOT EXISTS service_samples (
+			id BIGSERIAL PRIMARY KEY,
+			metric_sample_id BIGINT NOT NULL REFERENCES metric_samples(id) ON DELETE CASCADE,
+			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			name TEXT NOT NULL,
+			status TEXT NOT NULL
+		)`,
+		"CREATE INDEX IF NOT EXISTS service_samples_agent_time_idx ON service_samples(agent_id, captured_at DESC)",
+	}
+	for _, statement := range statements {
+		if _, err := s.pool.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) EnsureAdmin(ctx context.Context, username, password string) error {
@@ -90,7 +142,7 @@ func (s *Store) AuthenticateUser(ctx context.Context, username, password string)
 	return &user, nil
 }
 
-func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, agentName, installStyle, releaseVersion string) (*EnrollmentTokenResult, error) {
+func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, downloadURL, agentName, installStyle, releaseVersion string) (*EnrollmentTokenResult, error) {
 	if ttlHours <= 0 {
 		ttlHours = 24
 	}
@@ -115,8 +167,8 @@ func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, 
 	if releaseVersion == "" {
 		releaseVersion = "latest"
 	}
-	linuxCommand := installCommand(serverURL, token, agentName, "linux", releaseVersion)
-	windowsCommand := installCommand(serverURL, token, agentName, "windows", releaseVersion)
+	linuxCommand := installCommand(serverURL, downloadURL, token, agentName, "linux", releaseVersion)
+	windowsCommand := installCommand(serverURL, downloadURL, token, agentName, "windows", releaseVersion)
 	resultCommand := linuxCommand
 	if installStyle == "windows" {
 		resultCommand = windowsCommand
@@ -214,10 +266,11 @@ func (s *Store) InsertMetrics(ctx context.Context, agentID string, req models.Me
 
 	var sampleID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO metric_samples (agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO metric_samples
+			(agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent, swap_total_bytes, swap_used_bytes, swap_used_percent)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
-	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent).Scan(&sampleID)
+	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent, int64(req.SwapTotalBytes), int64(req.SwapUsedBytes), req.SwapUsedPercent).Scan(&sampleID)
 	if err != nil {
 		return err
 	}
@@ -228,6 +281,36 @@ func (s *Store) InsertMetrics(ctx context.Context, agentID string, req models.Me
 				(metric_sample_id, agent_id, name, mountpoint, filesystem, total_bytes, used_bytes, free_bytes, used_percent)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		`, sampleID, agentID, disk.Name, disk.Mountpoint, disk.Filesystem, int64(disk.TotalBytes), int64(disk.UsedBytes), int64(disk.FreeBytes), disk.UsedPercent)
+		if err != nil {
+			return err
+		}
+	}
+	for _, network := range req.Networks {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO network_samples
+				(metric_sample_id, agent_id, name, bytes_sent, bytes_recv, up)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, sampleID, agentID, network.Name, int64(network.BytesSent), int64(network.BytesRecv), network.Up)
+		if err != nil {
+			return err
+		}
+	}
+	for _, proc := range req.Processes {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO process_samples
+				(metric_sample_id, agent_id, pid, name, cpu_percent, memory_percent)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, sampleID, agentID, proc.PID, proc.Name, proc.CPUPercent, float64(proc.MemoryPercent))
+		if err != nil {
+			return err
+		}
+	}
+	for _, service := range req.Services {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO service_samples
+				(metric_sample_id, agent_id, name, status)
+			VALUES ($1, $2, $3, $4)
+		`, sampleID, agentID, service.Name, service.Status)
 		if err != nil {
 			return err
 		}
@@ -267,6 +350,14 @@ func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (
 		  SELECT DISTINCT ON (agent_id, mountpoint) agent_id, mountpoint, used_percent
 		  FROM disk_samples
 		  ORDER BY agent_id, mountpoint, captured_at DESC
+		), latest_network AS (
+		  SELECT DISTINCT ON (agent_id, name) agent_id, name, bytes_sent, bytes_recv
+		  FROM network_samples
+		  ORDER BY agent_id, name, captured_at DESC
+		), latest_services AS (
+		  SELECT DISTINCT ON (agent_id, name) agent_id, name, status
+		  FROM service_samples
+		  ORDER BY agent_id, name, captured_at DESC
 		)
 		SELECT
 		  count(*)::int,
@@ -277,25 +368,30 @@ func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (
 		  COALESCE(avg(cpu_percent), 0)::float8,
 		  COALESCE(avg(memory_used_percent), 0)::float8,
 		  (SELECT count(*)::int FROM alerts WHERE active = true),
-		  (SELECT count(*)::int FROM latest_disks WHERE used_percent >= 90)
+		  (SELECT count(*)::int FROM latest_disks WHERE used_percent >= 90),
+		  COALESCE((SELECT sum(bytes_sent + bytes_recv)::bigint FROM latest_network), 0),
+		  (SELECT count(*)::int FROM latest_services WHERE status <> 'running')
 		FROM agent_state
 	`, offlineAfterSeconds)
 
-	var total, online, warning, critical, offline, activeAlerts, criticalDisks int
+	var total, online, warning, critical, offline, activeAlerts, criticalDisks, servicesDown int
+	var networkBytes int64
 	var avgCPU, avgRAM float64
-	if err := row.Scan(&total, &online, &warning, &critical, &offline, &avgCPU, &avgRAM, &activeAlerts, &criticalDisks); err != nil {
+	if err := row.Scan(&total, &online, &warning, &critical, &offline, &avgCPU, &avgRAM, &activeAlerts, &criticalDisks, &networkBytes, &servicesDown); err != nil {
 		return nil, err
 	}
 	return map[string]any{
-		"total_agents":      total,
-		"online_agents":     online,
-		"warning_agents":    warning,
-		"critical_agents":   critical,
-		"offline_agents":    offline,
-		"active_alerts":     activeAlerts,
-		"avg_cpu_percent":   avgCPU,
-		"avg_memory_percent": avgRAM,
-		"critical_disks":    criticalDisks,
+		"total_agents":        total,
+		"online_agents":       online,
+		"warning_agents":      warning,
+		"critical_agents":     critical,
+		"offline_agents":      offline,
+		"active_alerts":       activeAlerts,
+		"avg_cpu_percent":     avgCPU,
+		"avg_memory_percent":  avgRAM,
+		"critical_disks":      criticalDisks,
+		"network_total_bytes": networkBytes,
+		"services_down":       servicesDown,
 	}, nil
 }
 
@@ -369,11 +465,23 @@ func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds 
 	if err != nil {
 		return nil, err
 	}
+	networks, err := s.latestNetworks(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	processes, err := s.latestProcesses(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	services, err := s.latestServices(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	history, err := s.metricHistory(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"agent": agent, "disks": disks, "history": history}, nil
+	return map[string]any{"agent": agent, "disks": disks, "networks": networks, "processes": processes, "services": services, "history": history}, nil
 }
 
 func (s *Store) UpdateAgentName(ctx context.Context, id, name string) error {
@@ -444,15 +552,15 @@ func (s *Store) AgentStatus(ctx context.Context, id string, offlineAfterSeconds 
 		return nil, err
 	}
 	return map[string]any{
-		"agent_id":             agentID,
-		"name":                 name,
-		"status":               status,
-		"is_offline":           status == models.StatusOffline,
-		"last_seen_at":         lastSeenAt,
-		"last_metric_at":       lastMetricAt,
-		"cpu_percent":          lastCPU,
-		"memory_used_percent":  lastMemory,
-		"active_alerts":        activeAlerts,
+		"agent_id":              agentID,
+		"name":                  name,
+		"status":                status,
+		"is_offline":            status == models.StatusOffline,
+		"last_seen_at":          lastSeenAt,
+		"last_metric_at":        lastMetricAt,
+		"cpu_percent":           lastCPU,
+		"memory_used_percent":   lastMemory,
+		"active_alerts":         activeAlerts,
 		"offline_after_seconds": offlineAfterSeconds,
 	}, nil
 }
@@ -517,6 +625,85 @@ func (s *Store) latestDisks(ctx context.Context, agentID string) ([]models.DiskM
 		disks = append(disks, disk)
 	}
 	return disks, rows.Err()
+}
+
+func (s *Store) latestNetworks(ctx context.Context, agentID string) ([]models.NetMetric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (name)
+		       name, bytes_sent, bytes_recv, up
+		FROM network_samples
+		WHERE agent_id = $1
+		ORDER BY name, captured_at DESC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	networks := []models.NetMetric{}
+	for rows.Next() {
+		var network models.NetMetric
+		var sent, recv int64
+		if err := rows.Scan(&network.Name, &sent, &recv, &network.Up); err != nil {
+			return nil, err
+		}
+		network.BytesSent = uint64(sent)
+		network.BytesRecv = uint64(recv)
+		networks = append(networks, network)
+	}
+	return networks, rows.Err()
+}
+
+func (s *Store) latestProcesses(ctx context.Context, agentID string) ([]models.ProcMetric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT pid, name, cpu_percent, memory_percent
+		FROM process_samples
+		WHERE metric_sample_id = (
+			SELECT id FROM metric_samples WHERE agent_id = $1 ORDER BY captured_at DESC LIMIT 1
+		)
+		ORDER BY cpu_percent DESC, memory_percent DESC
+		LIMIT 5
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	processes := []models.ProcMetric{}
+	for rows.Next() {
+		var proc models.ProcMetric
+		var memory float64
+		if err := rows.Scan(&proc.PID, &proc.Name, &proc.CPUPercent, &memory); err != nil {
+			return nil, err
+		}
+		proc.MemoryPercent = float32(memory)
+		processes = append(processes, proc)
+	}
+	return processes, rows.Err()
+}
+
+func (s *Store) latestServices(ctx context.Context, agentID string) ([]models.SvcMetric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (name)
+		       name, status
+		FROM service_samples
+		WHERE agent_id = $1
+		ORDER BY name, captured_at DESC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	services := []models.SvcMetric{}
+	for rows.Next() {
+		var service models.SvcMetric
+		if err := rows.Scan(&service.Name, &service.Status); err != nil {
+			return nil, err
+		}
+		services = append(services, service)
+	}
+	return services, rows.Err()
 }
 
 func (s *Store) metricHistory(ctx context.Context, agentID string) ([]map[string]any, error) {
@@ -662,7 +849,7 @@ func hashSecret(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func installCommand(serverURL, token, agentName, style, releaseVersion string) string {
+func installCommand(serverURL, downloadURL, token, agentName, style, releaseVersion string) string {
 	if serverURL == "" {
 		serverURL = "https://monitor.example.com"
 	}
@@ -673,19 +860,28 @@ func installCommand(serverURL, token, agentName, style, releaseVersion string) s
 	if agentName != "" {
 		nameArg = " --name \"" + agentName + "\""
 	}
-	releasePath := "latest"
-	if releaseVersion != "latest" {
-		releasePath = "download/" + releaseVersion
-	} else {
-		releasePath = "latest/download"
-	}
-	base := "https://github.com/Quesillo27/resource-monitor/releases/" + releasePath
-	scriptBase := base
-	if releaseVersion == "latest" {
-		scriptBase = "https://raw.githubusercontent.com/Quesillo27/resource-monitor/main/scripts"
-	}
+	localBase := deriveDownloadBase(serverURL, downloadURL)
 	if style == "windows" {
-		return "iwr " + scriptBase + "/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ")
+		return "iwr " + localBase + "/install-agent.ps1 -UseBasicParsing -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ") + " -AgentUrl " + localBase + "/resource-monitor-agent-windows-amd64.exe"
 	}
-	return "curl -fsSL " + scriptBase + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg
+	return "curl -fsSL " + localBase + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg + " --agent-url " + localBase + "/resource-monitor-agent-linux-amd64"
+}
+
+func deriveDownloadBase(serverURL, downloadURL string) string {
+	if downloadURL != "" {
+		return strings.TrimRight(downloadURL, "/")
+	}
+	parsed, err := url.Parse(serverURL)
+	if err != nil || parsed.Host == "" {
+		return "http://localhost:3000/downloads"
+	}
+	host, _, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		host = parsed.Host
+	}
+	parsed.Host = net.JoinHostPort(host, "3000")
+	parsed.Path = "/downloads"
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return strings.TrimRight(parsed.String(), "/")
 }
