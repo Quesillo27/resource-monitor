@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"resource-monitor/agent/internal/client"
@@ -150,7 +149,7 @@ func runCmd(args []string) {
 		loaded.IntervalSeconds = 60
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 	if err := runLoop(ctx, loaded); err != nil {
 		log.Fatal(err)
