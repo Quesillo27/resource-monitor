@@ -1,4 +1,5 @@
 const ENHANCED_ATTR = 'data-rm-hover-ready';
+let scheduled = false;
 
 function parseScale(text) {
   const raw = String(text || '').trim();
@@ -81,11 +82,20 @@ function buildTimeTicks(rangeHours) {
   return [0, 0.25, 0.5, 0.75, 1].map((ratio) => formatTick(new Date(start + (end - start) * ratio), rangeHours));
 }
 
+function setHtmlIfChanged(element, html) {
+  if (element.dataset.lastHtml !== html) {
+    element.dataset.lastHtml = html;
+    element.innerHTML = html;
+  }
+}
+
 function renderAxes(panel, svg, scale) {
+  if (!svg.isConnected) return;
   const svgRect = svg.getBoundingClientRect();
+  if (!svgRect.width || !svgRect.height) return;
   const panelRect = panel.getBoundingClientRect();
-  let yAxis = panel.querySelector('.rm-y-axis');
-  let xAxis = panel.querySelector('.rm-x-axis');
+  let yAxis = panel.querySelector(':scope > .rm-y-axis');
+  let xAxis = panel.querySelector(':scope > .rm-x-axis');
   if (!yAxis) {
     yAxis = document.createElement('div');
     yAxis.className = 'rm-y-axis';
@@ -98,13 +108,13 @@ function renderAxes(panel, svg, scale) {
   }
 
   const yValues = [1, 0.75, 0.5, 0.25, 0].map((ratio) => formatValue(scale.value * ratio, scale.unit));
-  yAxis.innerHTML = yValues.map((value) => `<span>${value}</span>`).join('');
+  setHtmlIfChanged(yAxis, yValues.map((value) => `<span>${value}</span>`).join(''));
   yAxis.style.top = `${svgRect.top - panelRect.top}px`;
   yAxis.style.left = `${Math.max(8, svgRect.left - panelRect.left - 58)}px`;
   yAxis.style.height = `${svgRect.height}px`;
 
-  const rangeHours = currentRangeHours();
-  xAxis.innerHTML = buildTimeTicks(rangeHours).map((value) => `<span>${value}</span>`).join('');
+  const ticks = buildTimeTicks(currentRangeHours()).map((value) => `<span>${value}</span>`).join('');
+  setHtmlIfChanged(xAxis, ticks);
   xAxis.style.top = `${svgRect.bottom - panelRect.top + 8}px`;
   xAxis.style.left = `${svgRect.left - panelRect.left}px`;
   xAxis.style.width = `${svgRect.width}px`;
@@ -118,58 +128,76 @@ function enhancePanel(panel) {
 
   const scale = parseScale(scaleText);
   panel.classList.add('chart-hover-panel', 'chart-axis-panel');
+  if (panel.getAttribute(ENHANCED_ATTR) !== '1') {
+    panel.setAttribute(ENHANCED_ATTR, '1');
+    const cursor = document.createElement('div');
+    cursor.className = 'hover-cursor-line';
+    const tooltip = document.createElement('div');
+    tooltip.className = 'hover-value-tooltip';
+    panel.append(cursor, tooltip);
+
+    svg.addEventListener('mousemove', (event) => {
+      const points = polylines[0].points;
+      if (!points?.numberOfItems || !svg.getScreenCTM()) return;
+
+      const svgMouse = svgPointFromMouse(svg, event);
+      const index = nearestPointIndex(points, svgMouse.x);
+      const point = points.getItem(index);
+      const clientPoint = clientPointFromSvg(svg, point.x, point.y);
+      const panelRect = panel.getBoundingClientRect();
+      const svgRect = svg.getBoundingClientRect();
+      const left = clientPoint.x - panelRect.left;
+
+      cursor.style.display = 'block';
+      cursor.style.left = `${left}px`;
+      cursor.style.top = `${svgRect.top - panelRect.top}px`;
+      cursor.style.height = `${svgRect.height}px`;
+
+      const rows = polylines.map((line, lineIndex) => {
+        const linePoint = line.points.getItem(index);
+        const value = lineValue(linePoint.y, scale.value);
+        const color = colorFor(panel, lineIndex, line);
+        return `<span><i style="background:${color}"></i>${labelFor(panel, lineIndex)}<b>${formatValue(value, scale.unit)}</b></span>`;
+      }).join('');
+
+      const tickIndex = Math.round((index / Math.max(points.numberOfItems - 1, 1)) * 4);
+      tooltip.innerHTML = `<strong>${buildTimeTicks(currentRangeHours())[tickIndex] || `Punto ${index + 1}`}</strong>${rows}`;
+      tooltip.style.display = 'grid';
+      tooltip.style.left = `${Math.min(Math.max(left, 115), panelRect.width - 115)}px`;
+      tooltip.style.top = `${Math.max(70, svgRect.top - panelRect.top + 14)}px`;
+    });
+
+    svg.addEventListener('mouseleave', () => {
+      cursor.style.display = 'none';
+      tooltip.style.display = 'none';
+    });
+  }
   renderAxes(panel, svg, scale);
-  if (panel.getAttribute(ENHANCED_ATTR) === '1') return;
-  panel.setAttribute(ENHANCED_ATTR, '1');
-
-  const cursor = document.createElement('div');
-  cursor.className = 'hover-cursor-line';
-  const tooltip = document.createElement('div');
-  tooltip.className = 'hover-value-tooltip';
-  panel.append(cursor, tooltip);
-
-  svg.addEventListener('mousemove', (event) => {
-    const points = polylines[0].points;
-    if (!points?.numberOfItems || !svg.getScreenCTM()) return;
-
-    const svgMouse = svgPointFromMouse(svg, event);
-    const index = nearestPointIndex(points, svgMouse.x);
-    const point = points.getItem(index);
-    const clientPoint = clientPointFromSvg(svg, point.x, point.y);
-    const panelRect = panel.getBoundingClientRect();
-    const svgRect = svg.getBoundingClientRect();
-    const left = clientPoint.x - panelRect.left;
-
-    cursor.style.display = 'block';
-    cursor.style.left = `${left}px`;
-    cursor.style.top = `${svgRect.top - panelRect.top}px`;
-    cursor.style.height = `${svgRect.height}px`;
-
-    const rows = polylines.map((line, lineIndex) => {
-      const linePoint = line.points.getItem(index);
-      const value = lineValue(linePoint.y, scale.value);
-      const color = colorFor(panel, lineIndex, line);
-      return `<span><i style="background:${color}"></i>${labelFor(panel, lineIndex)}<b>${formatValue(value, scale.unit)}</b></span>`;
-    }).join('');
-
-    tooltip.innerHTML = `<strong>${buildTimeTicks(currentRangeHours())[Math.round((index / Math.max(points.numberOfItems - 1, 1)) * 4)] || `Punto ${index + 1}`}</strong>${rows}`;
-    tooltip.style.display = 'grid';
-    tooltip.style.left = `${Math.min(Math.max(left, 115), panelRect.width - 115)}px`;
-    tooltip.style.top = `${Math.max(70, svgRect.top - panelRect.top + 14)}px`;
-  });
-
-  svg.addEventListener('mouseleave', () => {
-    cursor.style.display = 'none';
-    tooltip.style.display = 'none';
-  });
 }
 
 function enhanceCharts() {
   document.querySelectorAll('.chart-grid .panel').forEach(enhancePanel);
 }
 
-const observer = new MutationObserver(enhanceCharts);
+function scheduleEnhance() {
+  if (scheduled) return;
+  scheduled = true;
+  requestAnimationFrame(() => {
+    scheduled = false;
+    enhanceCharts();
+  });
+}
+
+function isOwnDecoration(node) {
+  if (!(node instanceof Element)) return false;
+  return Boolean(node.closest('.rm-y-axis, .rm-x-axis, .hover-value-tooltip, .hover-cursor-line'));
+}
+
+const observer = new MutationObserver((mutations) => {
+  const meaningful = mutations.some((mutation) => [...mutation.addedNodes, ...mutation.removedNodes].some((node) => !isOwnDecoration(node)));
+  if (meaningful) scheduleEnhance();
+});
 observer.observe(document.documentElement, { childList: true, subtree: true });
-window.addEventListener('load', enhanceCharts);
-window.addEventListener('resize', enhanceCharts);
-setInterval(enhanceCharts, 2000);
+window.addEventListener('load', scheduleEnhance);
+window.addEventListener('resize', scheduleEnhance);
+setInterval(scheduleEnhance, 5000);
