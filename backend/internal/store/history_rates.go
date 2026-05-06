@@ -57,8 +57,8 @@ func (s *Store) historyNetworkRates(ctx context.Context, agentID, window, bucket
 			  AND captured_at >= now() - $2::interval
 		), per_sample AS (
 			SELECT captured_at,
-			       sum(delta_sent / NULLIF(seconds, 0)) AS sent_bps,
-			       sum(delta_recv / NULLIF(seconds, 0)) AS recv_bps,
+			       sum(delta_sent::float8 / NULLIF(seconds, 0)) AS sent_bps,
+			       sum(delta_recv::float8 / NULLIF(seconds, 0)) AS recv_bps,
 			       sum(delta_sent) AS sent_delta,
 			       sum(delta_recv) AS recv_delta
 			FROM rates
