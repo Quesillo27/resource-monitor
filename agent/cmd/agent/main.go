@@ -224,7 +224,7 @@ func doctorCmd(args []string) {
 func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	cfg := &config.Config{}
 	fs := flag.NewFlagSet(name, flag.ExitOnError)
-	fs.StringVar(&cfg.ConfigPath, "config", "", "config file path")
+	fs.StringVar(&cfg.ConfigPath, "config", config.DefaultServiceConfigPath(), "config file path")
 	fs.StringVar(&cfg.ServerURL, "server-url", "", "central server URL")
 	fs.StringVar(&cfg.EnrollmentToken, "enrollment-token", "", "one-time enrollment token")
 	fs.StringVar(&cfg.Credential, "credential", "", "agent credential")
