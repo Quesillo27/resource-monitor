@@ -1,10 +1,11 @@
 param(
   [Parameter(Mandatory=$true)][string]$ServerUrl,
-  [Parameter(Mandatory=$true)][string]$EnrollmentToken,
+  [string]$EnrollmentToken = "",
   [string]$Name = "",
   [int]$Interval = 60,
   [string]$Version = "latest",
   [string]$AgentUrl = "",
+  [string]$DownloadUrl = "",
   [string]$Profile = "balanced",
   [string]$Services = ""
 )
@@ -17,8 +18,15 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
   throw "Run this installer from an elevated PowerShell session."
 }
 
+$configPath = "C:\ProgramData\ResourceMonitorAgent\config.json"
+if ($EnrollmentToken -eq "" -and -not (Test-Path $configPath)) {
+  throw "EnrollmentToken is required for first install. Existing installs can update without a token."
+}
+
 $repo = "Quesillo27/resource-monitor"
-if ($Version -eq "latest") {
+if ($DownloadUrl -ne "") {
+  $baseUrl = $DownloadUrl.TrimEnd("/")
+} elseif ($Version -eq "latest") {
   $baseUrl = "https://github.com/$repo/releases/latest/download"
 } else {
   $baseUrl = "https://github.com/$repo/releases/download/$Version"
@@ -40,14 +48,18 @@ Write-Host "Downloading $assetUrl..."
 try {
   Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing
 } catch {
-  throw "Could not download the Windows agent binary from $assetUrl. Wait for the local downloads service or GitHub Release assets to finish publishing, and verify network/TLS access from this host. Original error: $($_.Exception.Message)"
+  throw "Could not download the Windows agent binary from $assetUrl. Original error: $($_.Exception.Message)"
 }
 
-Write-Host "Registering and installing resource-monitor-agent..."
-& $installPath install --server-url $ServerUrl --enrollment-token $EnrollmentToken --name $Name --interval $Interval --profile $Profile --services $Services
+Write-Host "Installing or updating resource-monitor-agent..."
+$args = @("install", "--server-url", $ServerUrl, "--interval", $Interval, "--profile", $Profile)
+if ($EnrollmentToken -ne "") { $args += @("--enrollment-token", $EnrollmentToken) }
+if ($Name -ne "") { $args += @("--name", $Name) }
+if ($Services -ne "") { $args += @("--services", $Services) }
+& $installPath @args
 
 Start-Service resource-monitor-agent -ErrorAction SilentlyContinue
 Write-Host "Running agent doctor..."
-& $installPath doctor --config "C:\ProgramData\ResourceMonitorAgent\config.json"
+& $installPath doctor --config $configPath
 Get-Service resource-monitor-agent
-Write-Host "Resource Monitor agent installation complete."
+Write-Host "Resource Monitor agent installation/update complete."
