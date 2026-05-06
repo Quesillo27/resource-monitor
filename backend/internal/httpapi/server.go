@@ -40,13 +40,18 @@ func (s *Server) Routes() http.Handler {
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireUser)
 			r.Get("/dashboard/summary", s.dashboardSummary)
+			r.Get("/dashboard/overview", s.dashboardOverview)
 			r.Get("/agents", s.listAgents)
 			r.Get("/agents/{id}", s.agentDetail)
+			r.Get("/agents/{id}/history", s.agentHistory)
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Patch("/agents/{id}", s.updateAgent)
 			r.Delete("/agents/{id}", s.deleteAgent)
 			r.Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/alerts", s.listAlerts)
+			r.Get("/alert-settings/smtp", s.getSMTPSettings)
+			r.Put("/alert-settings/smtp", s.saveSMTPSettings)
+			r.Post("/alert-settings/smtp/test", s.testSMTPSettings)
 		})
 
 		r.Post("/agent/register", s.registerAgent)
@@ -91,6 +96,15 @@ func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
+func (s *Server) dashboardOverview(w http.ResponseWriter, r *http.Request) {
+	overview, err := s.store.DashboardOverview(r.Context(), s.cfg.OfflineAfterSeconds)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "overview failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, overview)
+}
+
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 	agents, err := s.store.ListAgents(r.Context(), s.cfg.OfflineAfterSeconds, r.URL.Query().Get("q"))
 	if err != nil {
@@ -111,6 +125,19 @@ func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) agentHistory(w http.ResponseWriter, r *http.Request) {
+	rangeName := r.URL.Query().Get("range")
+	if rangeName == "" {
+		rangeName = "24h"
+	}
+	history, err := s.store.AgentHistory(r.Context(), chi.URLParam(r, "id"), rangeName)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent history failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, history)
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +176,7 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, _ := r.Context().Value(userIDKey{}).(string)
-	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.DownloadURL, req.AgentName, req.InstallStyle, req.ReleaseVersion)
+	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.DownloadURL, req.AgentName, req.InstallStyle, req.ReleaseVersion, req.Profile, req.Services, req.Interval)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token creation failed")
 		return
@@ -178,6 +205,48 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
+}
+
+func (s *Server) getSMTPSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.store.GetSMTPSettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "smtp settings failed")
+		return
+	}
+	settings.Password = ""
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) saveSMTPSettings(w http.ResponseWriter, r *http.Request) {
+	var req models.SMTPSettings
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.Password == "" {
+		current, err := s.store.GetSMTPSettings(r.Context())
+		if err == nil {
+			req.Password = current.Password
+		}
+	}
+	settings, err := s.store.SaveSMTPSettings(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "smtp save failed")
+		return
+	}
+	settings.Password = ""
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) testSMTPSettings(w http.ResponseWriter, r *http.Request) {
+	var req models.SMTPSettings
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.TestSMTPSettings(r.Context(), req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
 }
 
 func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +317,7 @@ func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
