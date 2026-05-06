@@ -416,7 +416,7 @@ function AlertList({ alerts, compact = false }) {
 }
 
 function DisksTable({ disks }) {
-  return <DataTable empty="Sin muestras de disco" columns={['Disco', 'Mount', 'FS', 'Uso', 'Libre']} rows={disks.map((d) => [d.name, d.mountpoint, d.filesystem, <Usage value={d.used_percent} />, bytes(d.free_bytes)])} />;
+  return <DataTable empty="Sin muestras de disco" columns={['Unidad / Disco', 'Mount', 'FS', 'Total', 'Usado', 'Libre', 'Uso']} rows={disks.map((d) => [diskLabel(d), d.mountpoint, d.filesystem, bytes(d.total_bytes), bytes(d.used_bytes), bytes(d.free_bytes), <Usage value={d.used_percent} />])} />;
 }
 
 function NetworkTable({ networks }) {
@@ -569,6 +569,13 @@ function bytes(value) {
     unit += 1;
   }
   return `${next.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
+function diskLabel(disk) {
+  if (!disk?.name && !disk?.mountpoint) return 'n/a';
+  if (/^[A-Z]:\\?$/i.test(disk.mountpoint || '')) return disk.mountpoint.replace(/\\?$/, '');
+  if (/^[A-Z]:/i.test(disk.name || '')) return disk.name.slice(0, 2);
+  return disk.name || disk.mountpoint;
 }
 
 function defaultDownloadUrl(apiBase) {
