@@ -1,0 +1,167 @@
+.chart-toolbar {
+  background: #ffffff;
+  border: 1px solid #e1e8f0;
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.035);
+  padding: 14px 16px;
+}
+
+.chart-toolbar h2 {
+  font-size: 18px;
+}
+
+.chart-toolbar span {
+  display: block;
+  margin-top: 4px;
+}
+
+.chart-grid {
+  align-items: start;
+  gap: 16px;
+}
+
+.chart-grid .panel {
+  border-color: #dfe7f0;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.055);
+  min-height: 360px;
+  padding: 18px;
+}
+
+.chart-grid .panel::before {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #475569;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+  padding: 4px 9px;
+  text-transform: uppercase;
+}
+
+.chart-grid .panel:nth-child(1)::before {
+  content: 'Porcentaje de consumo';
+}
+
+.chart-grid .panel:nth-child(2)::before {
+  content: 'Trafico por muestra';
+}
+
+.chart-grid .panel:nth-child(3)::before {
+  content: 'Filesystem / unidad';
+}
+
+.chart-grid .panel-head {
+  align-items: flex-start;
+  border-bottom: 1px solid #edf2f7;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+}
+
+.chart-grid .panel-head h2 {
+  color: #0f172a;
+  font-size: 17px;
+}
+
+.chart-grid .panel-head::after {
+  background: #f1f5f9;
+  border: 1px solid #dde6f0;
+  border-radius: 999px;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.chart-grid .panel:nth-child(1) .panel-head::after,
+.chart-grid .panel:nth-child(3) .panel-head::after {
+  content: '%';
+}
+
+.chart-grid .panel:nth-child(2) .panel-head::after {
+  content: 'bytes';
+}
+
+.legend {
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.legend span {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 5px 9px;
+}
+
+.legend i {
+  height: 8px;
+  width: 8px;
+}
+
+.chart {
+  background:
+    linear-gradient(#e8eef6 1px, transparent 1px) 0 0 / 100% 25%,
+    linear-gradient(90deg, #eef3f8 1px, transparent 1px) 0 0 / 12.5% 100%,
+    #fbfdff;
+  border: 1px solid #e1e8f0;
+  border-radius: 8px;
+  height: 250px;
+  padding: 8px;
+}
+
+.chart path {
+  stroke: #cfd9e6;
+  stroke-width: 0.25;
+}
+
+.chart polyline {
+  filter: drop-shadow(0 2px 2px rgba(15, 23, 42, 0.12));
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.05;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-scale {
+  border-top: 1px solid #edf2f7;
+  color: #64748b;
+  font-size: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
+}
+
+.chart-grid .panel:nth-child(1) .chart-scale span:first-child,
+.chart-grid .panel:nth-child(3) .chart-scale span:first-child {
+  font-size: 0;
+}
+
+.chart-grid .panel:nth-child(1) .chart-scale span:first-child::after,
+.chart-grid .panel:nth-child(3) .chart-scale span:first-child::after {
+  content: '0%';
+  font-size: 12px;
+}
+
+.chart-grid .panel:nth-child(2) .chart-scale span:first-child {
+  font-size: 0;
+}
+
+.chart-grid .panel:nth-child(2) .chart-scale span:first-child::after {
+  content: '0 B';
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .chart-grid .panel {
+    min-height: 320px;
+  }
+}
