@@ -3,7 +3,8 @@ param(
   [Parameter(Mandatory=$true)][string]$EnrollmentToken,
   [string]$Name = "",
   [int]$Interval = 60,
-  [string]$Version = "latest"
+  [string]$Version = "latest",
+  [string]$AgentUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -30,6 +31,9 @@ if (Get-Service resource-monitor-agent -ErrorAction SilentlyContinue) {
 }
 
 $assetUrl = "$baseUrl/resource-monitor-agent-windows-amd64.exe"
+if ($AgentUrl -ne "") {
+  $assetUrl = $AgentUrl
+}
 Write-Host "Downloading $assetUrl..."
 try {
   Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing
