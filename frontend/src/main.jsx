@@ -25,22 +25,23 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('rm_token') || '');
   const [view, setView] = useState('dashboard');
+  const logout = () => {
+    localStorage.removeItem('rm_token');
+    setToken('');
+  };
 
   if (!token) {
     return <Login onLogin={setToken} />;
   }
 
   return (
-    <Shell token={token} view={view} setView={setView} onLogout={() => {
-      localStorage.removeItem('rm_token');
-      setToken('');
-    }} />
+    <Shell token={token} view={view} setView={setView} onLogout={logout} />
   );
 }
 
 function Shell({ token, view, setView, onLogout }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
-  const api = useMemo(() => createApi(token), [token]);
+  const api = useMemo(() => createApi(token, onLogout), [token, onLogout]);
 
   const nav = [
     ['dashboard', LayoutDashboard, 'Dashboard'],
@@ -453,21 +454,24 @@ function useLoad(loader, deps) {
   return { data, loading, reload: () => setVersion((v) => v + 1) };
 }
 
-function createApi(token) {
+function createApi(token, onUnauthorized) {
   return {
-    get: (path) => request(path, { method: 'GET' }, token),
-    post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }, token),
-    patch: (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body) }, token),
-    delete: (path) => request(path, { method: 'DELETE' }, token),
+    get: (path) => request(path, { method: 'GET' }, token, onUnauthorized),
+    post: (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) }, token, onUnauthorized),
+    patch: (path, body) => request(path, { method: 'PATCH', body: JSON.stringify(body) }, token, onUnauthorized),
+    delete: (path) => request(path, { method: 'DELETE' }, token, onUnauthorized),
   };
 }
 
-async function request(path, options, token) {
+async function request(path, options, token, onUnauthorized) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
   });
   const data = await res.json();
+  if (res.status === 401) {
+    onUnauthorized?.();
+  }
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
