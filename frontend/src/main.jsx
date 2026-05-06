@@ -298,11 +298,13 @@ function Enrollment({ api }) {
   const [installStyle, setInstallStyle] = useState('linux');
   const [releaseVersion, setReleaseVersion] = useState('latest');
   const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function createToken(event) {
     event.preventDefault();
     setLoading(true);
+    setError('');
     try {
       const data = await api.post('/api/enrollment-tokens', {
         name: agentName || 'Alta agente',
@@ -313,6 +315,8 @@ function Enrollment({ api }) {
         release_version: releaseVersion,
       });
       setResult(data);
+    } catch (err) {
+      setError(err.message || 'No se pudo generar el token');
     } finally {
       setLoading(false);
     }
@@ -329,6 +333,7 @@ function Enrollment({ api }) {
           <button type="button" className={installStyle === 'linux' ? 'selected' : ''} onClick={() => setInstallStyle('linux')}>Linux</button>
           <button type="button" className={installStyle === 'windows' ? 'selected' : ''} onClick={() => setInstallStyle('windows')}>Windows</button>
         </div>
+        {error && <p className="form-error">{error}</p>}
         <button className="primary" disabled={loading}>{loading ? 'Generando...' : 'Generar token'}</button>
       </form>
       {result && (
