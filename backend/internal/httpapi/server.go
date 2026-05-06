@@ -149,7 +149,7 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, _ := r.Context().Value(userIDKey{}).(string)
-	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.AgentName, req.InstallStyle, req.ReleaseVersion)
+	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.DownloadURL, req.AgentName, req.InstallStyle, req.ReleaseVersion)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token creation failed")
 		return
