@@ -115,7 +115,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
-	detail, err := s.store.AgentDetail(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
+	detail, err := s.store.AgentDetailV3(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -176,7 +176,7 @@ func (s *Server) createEnrollmentToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID, _ := r.Context().Value(userIDKey{}).(string)
-	result, err := s.store.CreateEnrollmentToken(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.DownloadURL, req.AgentName, req.InstallStyle, req.ReleaseVersion, req.Profile, req.Services, req.Interval)
+	result, err := s.store.CreateEnrollmentTokenAdvanced(r.Context(), userID, req.Name, req.TTLHours, req.ServerURL, req.DownloadURL, req.AgentName, req.InstallStyle, req.ReleaseVersion, req.Profile, req.Services, req.Interval)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token creation failed")
 		return
@@ -289,6 +289,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "metrics failed")
 		return
 	}
+	_ = s.store.NotifyDueAlerts(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
 }
 
