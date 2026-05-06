@@ -39,7 +39,7 @@ services:
       - agent-downloads:/downloads
     command: >
       sh -c "apk add --no-cache git ca-certificates &&
-      cp -R /src/agent /work/agent &&
+      cp -R /src/agent/. /work/agent/ &&
       go mod download &&
       GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
       GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
