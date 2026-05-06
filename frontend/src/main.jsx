@@ -25,6 +25,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import './styles.css';
+import './resources-polish.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 const REFRESH_MS = 60000;
@@ -232,7 +233,7 @@ function AgentDetail({ api, agentId, onBack }) {
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
-          {tab === 'resources' && <ResourcesTab history={data.range_history} range={range} setRange={setRange} />}
+          {tab === 'resources' && <ResourcesTab agent={agent} history={data.range_history} disks={disks} networks={networks} range={range} setRange={setRange} />}
           {tab === 'disks' && <DisksTable disks={disks} />}
           {tab === 'network' && <NetworkTable networks={networks} />}
           {tab === 'processes' && <ProcessesTable processes={processes} />}
@@ -268,21 +269,69 @@ function SummaryTab({ agent, status, disks, networks, services, alerts }) {
   );
 }
 
-function ResourcesTab({ history, range, setRange }) {
+function ResourcesTab({ agent, history, disks: currentDisks = [], networks: currentNetworks = [], range, setRange }) {
   const metrics = history?.metrics || [];
-  const network = history?.networks || [];
-  const disks = history?.disks || [];
-  const diskNames = [...new Set(disks.map((d) => d.mountpoint))].slice(0, 4);
+  const network = history?.network || history?.networks || [];
+  const diskHistory = history?.disks || [];
+  const diskNames = [...new Set(diskHistory.map((d) => d.mountpoint || d.name))].slice(0, 4);
+  const latestMetric = lastItem(metrics) || {};
+  const latestNetwork = lastItem(network) || {};
+  const latestDisks = latestDiskValues(diskHistory);
+  const busiestDisk = [...(currentDisks.length ? currentDisks : latestDisks)].sort((a, b) => Number(b.used_percent || 0) - Number(a.used_percent || 0))[0];
+  const totalDiskBytes = currentDisks.reduce((sum, disk) => sum + Number(disk.total_bytes || 0), 0);
+  const usedDiskBytes = currentDisks.reduce((sum, disk) => sum + Number(disk.used_bytes || 0), 0);
   return (
     <>
       <div className="chart-toolbar">
-        <div><h2>Historico de recursos</h2><span>CPU, RAM, swap, red y discos con rango agregado</span></div>
+        <div><h2>Historico de recursos</h2><span>Pasa el mouse por una linea para ver fecha, serie y valor exacto del punto.</span></div>
         <div className="segmented">{['24h', '7d', '30d'].map((item) => <button key={item} className={range === item ? 'selected' : ''} onClick={() => setRange(item)}>{item}</button>)}</div>
       </div>
+      <div className="resource-console">
+        <Panel title="Informacion del servidor">
+          <div className="server-facts">
+            <span><strong>Equipo</strong>{agent?.hostname || agent?.name || 'n/a'}</span>
+            <span><strong>SO</strong>{agent?.os || 'n/a'} {agent?.arch || ''}</span>
+            <span><strong>Uptime</strong>{duration(agent?.uptime_seconds)}</span>
+            <span><strong>Ultima metrica</strong>{date(agent?.last_metric_at)}</span>
+          </div>
+        </Panel>
+        <Panel title="Memoria y almacenamiento">
+          <div className="resource-rings">
+            <Ring label="RAM" value={latestMetric.memory_used_percent} main={bytes(latestMetric.memory_used_bytes)} total={bytes(latestMetric.memory_total_bytes)} color="#38bdf8" />
+            <Ring label="Swap" value={latestMetric.swap_used_percent} main={bytes(latestMetric.swap_used_bytes)} total={bytes(latestMetric.swap_total_bytes)} color="#fb7185" />
+            <Ring label="Disco" value={totalDiskBytes ? (usedDiskBytes / totalDiskBytes) * 100 : busiestDisk?.used_percent} main={bytes(usedDiskBytes || busiestDisk?.used_bytes)} total={bytes(totalDiskBytes || busiestDisk?.total_bytes)} color="#72d572" />
+          </div>
+        </Panel>
+        <Panel title="Estadisticas de red">
+          <div className="network-stats">
+            <span><small>Recibido ahora</small><strong>{rate(latestNetwork.bytes_recv_per_sec)}</strong></span>
+            <span><small>Enviado ahora</small><strong>{rate(latestNetwork.bytes_sent_per_sec)}</strong></span>
+            <span><small>Interfaces</small><strong>{currentNetworks.length || 'n/a'}</strong></span>
+          </div>
+        </Panel>
+      </div>
       <div className="chart-grid">
-        <Panel title="CPU / RAM / Swap"><LineChart points={metrics} series={[["CPU %", "cpu_percent", "#1f6feb"], ["RAM %", "memory_used_percent", "#8b5cf6"], ["Swap %", "swap_used_percent", "#f59f00"]]} max={100} /></Panel>
-        <Panel title="Red enviada / recibida"><LineChart points={network} series={[["Recibido", "bytes_recv", "#0f766e"], ["Enviado", "bytes_sent", "#dc2626"]]} formatter={bytes} /></Panel>
-        <Panel title="Uso de disco por mount"><LineChart points={pivotDisks(disks, diskNames)} series={diskNames.map((name, index) => [name, name, ['#1f6feb', '#16a34a', '#f59f00', '#dc2626'][index]])} max={100} /></Panel>
+        <ChartPanel
+          title="CPU / RAM / Swap"
+          subtitle="Porcentaje de consumo por punto"
+          unit="%"
+        >
+          <LineChart points={metrics} series={[["CPU", "cpu_percent", "#2563eb"], ["RAM", "memory_used_percent", "#7c3aed"], ["Swap", "swap_used_percent", "#d97706"]]} max={100} />
+        </ChartPanel>
+        <ChartPanel
+          title="Red"
+          subtitle="Velocidad estimada recibida/enviada"
+          unit="B/s"
+        >
+          <LineChart points={network} series={[["Recibido", "bytes_recv_per_sec", "#fb5b7b"], ["Enviado", "bytes_sent_per_sec", "#38a3ff"]]} formatter={rate} />
+        </ChartPanel>
+        <ChartPanel
+          title="Uso de disco por unidad o mount"
+          subtitle="Porcentaje usado por filesystem"
+          unit="%"
+        >
+          <LineChart points={pivotDisks(diskHistory, diskNames)} series={diskNames.map((name, index) => [name, name, ['#2563eb', '#059669', '#d97706', '#dc2626'][index]])} max={100} />
+        </ChartPanel>
       </div>
     </>
   );
@@ -396,6 +445,35 @@ function Kpi({ icon: Icon, label, value, tone = '' }) {
   return <article className={`kpi ${tone}`}><Icon size={22} /><span>{label}</span><strong>{value}</strong></article>;
 }
 
+function MetricTile({ label, value, hint, tone = '' }) {
+  return <article className={`metric-tile ${tone}`}><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>;
+}
+
+function Ring({ label, value, main, total, color }) {
+  const safeValue = Math.max(0, Math.min(Number(value || 0), 100));
+  return (
+    <div className="ring-card">
+      <div className="ring" style={{ background: `conic-gradient(${color} ${safeValue * 3.6}deg, #d9dee6 0deg)` }}>
+        <span>{round(safeValue)}%</span>
+      </div>
+      <strong>{label}</strong>
+      <small>{main || '0 B'} / {total || '0 B'}</small>
+    </div>
+  );
+}
+
+function ChartPanel({ title, subtitle, unit, children }) {
+  return (
+    <section className="panel chart-panel">
+      <div className="panel-head chart-head">
+        <div><h2>{title}</h2><span>{subtitle}</span></div>
+        <small>{unit}</small>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function Status({ status }) {
   return <span className={`status ${status}`}>{status}</span>;
 }
@@ -440,23 +518,65 @@ function Usage({ value }) {
 }
 
 function LineChart({ points, series, max, formatter }) {
+  const [hoverIndex, setHoverIndex] = useState(null);
   if (!points?.length) return <div className="empty-chart">Sin historial para este rango</div>;
   const chartMax = max || Math.max(1, ...series.flatMap(([, key]) => points.map((p) => Number(p[key] || 0))));
+  const activeIndex = hoverIndex;
+  const activePoint = activeIndex === null ? null : points[activeIndex];
+  const activeX = activeIndex === null ? 0 : points.length > 1 ? (activeIndex / (points.length - 1)) * 100 : 0;
+  const yTicks = axisTicks(chartMax, formatter);
+  const xTicks = timeTicks(points);
+  const setHover = (event) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    setHoverIndex(Math.round(ratio * (points.length - 1)));
+  };
   return (
-    <div>
+    <div className="chart-shell">
       <div className="legend">{series.map(([label,, color]) => <span key={label}><i style={{ background: color }} />{label}</span>)}</div>
-      <svg className="chart" viewBox="0 0 100 46" preserveAspectRatio="none">
-        <path d="M0 40 H100" />
-        {series.map(([label, key, color]) => <polyline key={label} points={polyline(points.map((p) => Number(p[key] || 0)), chartMax)} style={{ stroke: color }} />)}
-      </svg>
-      <div className="chart-scale"><span>0</span><span>{formatter ? formatter(chartMax) : `${round(chartMax)}%`}</span></div>
+      <div className="chart-frame">
+        <div className="chart-axis y-axis">{yTicks.map((tick, index) => <span key={`${tick}-${index}`}>{tick}</span>)}</div>
+        <div className="chart-plot" onMouseMove={setHover} onMouseLeave={() => setHoverIndex(null)}>
+          <svg className="chart" viewBox="0 0 100 52" preserveAspectRatio="none">
+            <path d="M0 8 H100" />
+            <path d="M0 18 H100" />
+            <path d="M0 28 H100" />
+            <path d="M0 38 H100" />
+            <path d="M0 48 H100" />
+            {activePoint && <line className="chart-cursor" x1={activeX} x2={activeX} y1="8" y2="48" />}
+            {series.map(([label, key, color]) => <polyline key={label} points={polyline(points.map((p) => Number(p[key] || 0)), chartMax)} style={{ stroke: color }} />)}
+            {activePoint && series.map(([label, key, color]) => {
+              const value = Number(activePoint?.[key] || 0);
+              const y = 48 - (Math.max(0, value) / chartMax) * 40;
+              return <circle key={`${label}-dot`} cx={activeX} cy={y} r="1.1" style={{ fill: color }} />;
+            })}
+          </svg>
+          {activePoint && (
+            <div className="chart-tooltip" style={{ left: `${Math.min(Math.max(activeX, 12), 88)}%` }}>
+              <strong>{timeLabel(activePoint.captured_at)}</strong>
+              {series.map(([label, key, color]) => <span key={label}><i style={{ background: color }} />{label}<b>{formatter ? formatter(activePoint[key]) : `${round(activePoint[key])}%`}</b></span>)}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="chart-scale">{xTicks.map((tick, index) => <span key={`${tick}-${index}`}>{tick}</span>)}</div>
     </div>
   );
 }
 
+function axisTicks(maxValue, formatter) {
+  return [1, 0.75, 0.5, 0.25, 0].map((ratio) => formatter ? formatter(maxValue * ratio) : `${round(maxValue * ratio)}%`);
+}
+
+function timeTicks(points) {
+  if (!points?.length) return [];
+  const maxIndex = Math.max(points.length - 1, 1);
+  return [0, 0.25, 0.5, 0.75, 1].map((ratio) => points[Math.round(ratio * maxIndex)]).filter(Boolean).map((point) => timeLabel(point.captured_at));
+}
+
 function polyline(values, maxValue) {
   const maxIndex = Math.max(values.length - 1, 1);
-  return values.map((value, index) => `${((index / maxIndex) * 100).toFixed(2)},${(44 - (Math.max(0, value) / maxValue) * 40).toFixed(2)}`).join(' ');
+  return values.map((value, index) => `${((index / maxIndex) * 100).toFixed(2)},${(48 - (Math.max(0, value) / maxValue) * 40).toFixed(2)}`).join(' ');
 }
 
 function pivotDisks(disks, names) {
@@ -464,9 +584,59 @@ function pivotDisks(disks, names) {
   disks.forEach((disk) => {
     const key = disk.captured_at;
     byTime[key] = byTime[key] || { captured_at: key };
-    if (names.includes(disk.mountpoint)) byTime[key][disk.mountpoint] = disk.used_percent;
+    const name = disk.mountpoint || disk.name;
+    if (names.includes(name)) byTime[key][name] = disk.used_percent;
   });
   return Object.values(byTime);
+}
+
+function latestDiskValues(disks) {
+  const latest = {};
+  disks.forEach((disk) => {
+    const key = disk.mountpoint || disk.name;
+    if (!key) return;
+    if (!latest[key] || new Date(disk.captured_at || 0) >= new Date(latest[key].captured_at || 0)) latest[key] = disk;
+  });
+  return Object.values(latest);
+}
+
+function lastItem(items) {
+  return items?.length ? items[items.length - 1] : null;
+}
+
+function timeLabel(value) {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return parsed.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function duration(seconds) {
+  const value = Number(seconds || 0);
+  if (!value) return 'n/a';
+  const days = Math.floor(value / 86400);
+  const hours = Math.floor((value % 86400) / 3600);
+  const minutes = Math.floor((value % 3600) / 60);
+  return `${days}d ${hours}h ${minutes}m`;
+}
+
+function toneFor(value, warning, critical) {
+  const numeric = Number(value || 0);
+  if (numeric >= critical) return 'bad';
+  if (numeric >= warning) return 'warn';
+  return 'good';
+}
+
+function rate(value) {
+  const units = ['B/s', 'KiB/s', 'MiB/s', 'GiB/s', 'TiB/s'];
+  let next = Number(value || 0);
+  let unit = 0;
+  while (next >= 1024 && unit < units.length - 1) {
+    next /= 1024;
+    unit += 1;
+  }
+  const decimals = unit === 0 ? 0 : next >= 100 ? 0 : next >= 10 ? 1 : 2;
+  return `${next.toFixed(decimals)} ${units[unit]}`;
 }
 
 function WizardStep({ index, title, children }) {
