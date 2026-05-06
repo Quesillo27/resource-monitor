@@ -117,15 +117,13 @@ func send(ctx context.Context, cfg config.Config) error {
 	if err := api.Heartbeat(ctx, info); err != nil {
 		return err
 	}
-	log.Printf("heartbeat sent for %s", info.Name)
-	metrics, err := collector.Collect(ctx)
+	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {
 		return err
 	}
 	if err := api.SendMetrics(ctx, metrics); err != nil {
 		return err
 	}
-	log.Printf("metrics sent cpu=%.1f memory=%.1f disks=%d", metrics.CPUPercent, metrics.MemoryUsedPercent, len(metrics.Disks))
 	return nil
 }
 
