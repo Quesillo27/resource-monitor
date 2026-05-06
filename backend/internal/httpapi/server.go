@@ -132,7 +132,7 @@ func (s *Server) agentHistory(w http.ResponseWriter, r *http.Request) {
 	if rangeName == "" {
 		rangeName = "24h"
 	}
-	history, err := s.store.AgentHistory(r.Context(), chi.URLParam(r, "id"), rangeName)
+	history, err := s.store.AgentHistoryRates(r.Context(), chi.URLParam(r, "id"), rangeName)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "agent history failed")
 		return
