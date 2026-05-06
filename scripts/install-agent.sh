@@ -41,14 +41,34 @@ else
 fi
 
 TMP_BIN="$(mktemp)"
+TMP_SRC=""
 INSTALL_PATH="/usr/local/bin/resource-monitor-agent"
+cleanup() {
+  rm -f "$TMP_BIN"
+  if [[ -n "$TMP_SRC" ]]; then
+    rm -rf "$TMP_SRC"
+  fi
+}
+trap cleanup EXIT
 
 systemctl stop resource-monitor-agent 2>/dev/null || true
 
 echo "Downloading ${ASSET} from ${BASE_URL}..."
-curl -fL "${BASE_URL}/${ASSET}" -o "$TMP_BIN"
+if ! curl -fL "${BASE_URL}/${ASSET}" -o "$TMP_BIN"; then
+  echo "Release binary was not found. Falling back to build from source..."
+  if ! command -v git >/dev/null 2>&1; then
+    echo "git is required for source fallback. Install git or publish GitHub Release assets." >&2
+    exit 1
+  fi
+  if ! command -v go >/dev/null 2>&1; then
+    echo "go is required for source fallback. Install Go or publish GitHub Release assets." >&2
+    exit 1
+  fi
+  TMP_SRC="$(mktemp -d)"
+  git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_SRC"
+  (cd "$TMP_SRC/agent" && go mod tidy && go build -o "$TMP_BIN" ./cmd/agent)
+fi
 install -m 0755 "$TMP_BIN" "$INSTALL_PATH"
-rm -f "$TMP_BIN"
 
 echo "Registering and installing resource-monitor-agent..."
 "$INSTALL_PATH" install \
