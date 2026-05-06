@@ -4,7 +4,9 @@ param(
   [string]$Name = "",
   [int]$Interval = 60,
   [string]$Version = "latest",
-  [string]$AgentUrl = ""
+  [string]$AgentUrl = "",
+  [string]$Profile = "balanced",
+  [string]$Services = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,13 +40,13 @@ Write-Host "Downloading $assetUrl..."
 try {
   Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing
 } catch {
-  throw "Could not download the Windows agent binary from $assetUrl. Wait for the GitHub Release assets to finish publishing, or verify internet/TLS access from this host. Original error: $($_.Exception.Message)"
+  throw "Could not download the Windows agent binary from $assetUrl. Wait for the local downloads service or GitHub Release assets to finish publishing, and verify network/TLS access from this host. Original error: $($_.Exception.Message)"
 }
 
 Write-Host "Registering and installing resource-monitor-agent..."
-& $installPath install --server-url $ServerUrl --enrollment-token $EnrollmentToken --name $Name --interval $Interval
+& $installPath install --server-url $ServerUrl --enrollment-token $EnrollmentToken --name $Name --interval $Interval --profile $Profile --services $Services
 
-Start-Service resource-monitor-agent
+Start-Service resource-monitor-agent -ErrorAction SilentlyContinue
 Write-Host "Running agent doctor..."
 & $installPath doctor --config "C:\ProgramData\ResourceMonitorAgent\config.json"
 Get-Service resource-monitor-agent
