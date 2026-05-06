@@ -94,6 +94,13 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		return Metrics{}, err
 	}
 	swap, _ := mem.SwapMemoryWithContext(ctx)
+	var swapTotal, swapUsed uint64
+	var swapPercent float64
+	if swap != nil {
+		swapTotal = swap.Total
+		swapUsed = swap.Used
+		swapPercent = swap.UsedPercent
+	}
 
 	cpuPercent := 0.0
 	if len(cpuValues) > 0 {
@@ -104,9 +111,9 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		MemoryTotalBytes:  memory.Total,
 		MemoryUsedBytes:   memory.Used,
 		MemoryUsedPercent: memory.UsedPercent,
-		SwapTotalBytes:    swap.Total,
-		SwapUsedBytes:     swap.Used,
-		SwapUsedPercent:   swap.UsedPercent,
+		SwapTotalBytes:    swapTotal,
+		SwapUsedBytes:     swapUsed,
+		SwapUsedPercent:   swapPercent,
 		Disks:             disks,
 	}
 	if profile == "" || profile == "balanced" {
