@@ -123,8 +123,8 @@
 
 .chart-grid .chart-panel,
 .chart-grid .panel {
-  min-height: 390px;
-  padding: 18px;
+  min-height: 430px;
+  padding: 18px 18px 48px 76px;
 }
 
 .chart-grid .panel::before {
@@ -145,7 +145,7 @@
 }
 
 .chart-grid .panel:nth-child(2)::before {
-  content: 'Valor exacto al pasar el mouse';
+  content: 'Metricas de red';
 }
 
 .chart-grid .panel:nth-child(3)::before {
@@ -256,12 +256,44 @@
   vector-effect: non-scaling-stroke;
 }
 
+.rm-y-axis {
+  color: #53657d;
+  display: flex;
+  flex-direction: column;
+  font-size: 11px;
+  justify-content: space-between;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  text-align: right;
+  width: 52px;
+  z-index: 1;
+}
+
+.rm-y-axis span {
+  font-variant-numeric: tabular-nums;
+}
+
+.rm-x-axis {
+  color: #53657d;
+  display: flex;
+  font-size: 11px;
+  justify-content: space-between;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  z-index: 1;
+}
+
+.rm-x-axis span {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .hover-cursor-line {
   background: rgba(15, 23, 42, 0.35);
   display: none;
-  height: 250px;
   position: absolute;
-  top: 126px;
   width: 1px;
   z-index: 2;
 }
@@ -312,11 +344,7 @@
 }
 
 .chart-scale {
-  border-top: 1px solid #edf2f7;
-  color: #64748b;
-  font-size: 12px;
-  margin-top: 10px;
-  padding-top: 8px;
+  display: none;
 }
 
 @media (max-width: 1200px) {
@@ -333,7 +361,8 @@
 
   .chart-grid .chart-panel,
   .chart-grid .panel {
-    min-height: 340px;
+    min-height: 380px;
+    padding-left: 64px;
   }
 
   .hover-value-tooltip,
