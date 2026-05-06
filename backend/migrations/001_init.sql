@@ -112,10 +112,30 @@ CREATE TABLE IF NOT EXISTS alerts (
   active BOOLEAN NOT NULL DEFAULT TRUE,
   opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at TIMESTAMPTZ,
-  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_notified_at TIMESTAMPTZ,
+  notification_count INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS alerts_active_idx ON alerts(active, severity);
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_one_active_resource_idx
   ON alerts(agent_id, type, resource_key)
   WHERE active = true;
+
+CREATE TABLE IF NOT EXISTS smtp_settings (
+  id INTEGER PRIMARY KEY DEFAULT 1,
+  enabled BOOLEAN NOT NULL DEFAULT false,
+  host TEXT NOT NULL DEFAULT '',
+  port INTEGER NOT NULL DEFAULT 587,
+  username TEXT NOT NULL DEFAULT '',
+  password TEXT NOT NULL DEFAULT '',
+  from_address TEXT NOT NULL DEFAULT '',
+  to_addresses TEXT NOT NULL DEFAULT '',
+  use_tls BOOLEAN NOT NULL DEFAULT false,
+  use_starttls BOOLEAN NOT NULL DEFAULT true,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT smtp_settings_singleton CHECK (id = 1)
+);
+
+INSERT INTO smtp_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
