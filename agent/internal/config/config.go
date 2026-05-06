@@ -6,16 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 type Config struct {
-	ConfigPath      string `json:"-"`
-	ServerURL       string `json:"server_url"`
-	EnrollmentToken string `json:"enrollment_token,omitempty"`
-	Credential      string `json:"credential,omitempty"`
-	AgentID         string `json:"agent_id,omitempty"`
-	IntervalSeconds int    `json:"interval_seconds"`
-	Name            string `json:"name,omitempty"`
+	ConfigPath       string   `json:"-"`
+	ServerURL        string   `json:"server_url"`
+	EnrollmentToken  string   `json:"enrollment_token,omitempty"`
+	Credential       string   `json:"credential,omitempty"`
+	AgentID          string   `json:"agent_id,omitempty"`
+	IntervalSeconds  int      `json:"interval_seconds"`
+	Name             string   `json:"name,omitempty"`
+	Profile          string   `json:"profile,omitempty"`
+	ServiceChecks    []string `json:"service_checks,omitempty"`
+	ServiceChecksCSV string   `json:"-"`
 }
 
 func Load(path string) (Config, error) {
@@ -60,13 +64,36 @@ func LoadWithOverrides(overrides Config) (Config, error) {
 	if overrides.Name != "" {
 		cfg.Name = overrides.Name
 	}
+	if overrides.Profile != "" {
+		cfg.Profile = overrides.Profile
+	}
+	if len(overrides.ServiceChecks) > 0 {
+		cfg.ServiceChecks = overrides.ServiceChecks
+	}
+	if overrides.ServiceChecksCSV != "" {
+		cfg.ServiceChecks = append(cfg.ServiceChecks, SplitCSV(overrides.ServiceChecksCSV)...)
+	}
 	if overrides.IntervalSeconds > 0 {
 		cfg.IntervalSeconds = overrides.IntervalSeconds
 	}
 	if cfg.IntervalSeconds == 0 {
 		cfg.IntervalSeconds = 60
 	}
+	if cfg.Profile == "" {
+		cfg.Profile = "balanced"
+	}
 	return cfg, nil
+}
+
+func SplitCSV(value string) []string {
+	result := []string{}
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item != "" {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func Save(path string, cfg Config) error {
