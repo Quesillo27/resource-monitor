@@ -6,7 +6,8 @@
 }
 
 .resource-console .panel,
-.chart-grid .chart-panel {
+.chart-grid .chart-panel,
+.chart-grid .panel {
   border-color: #dfe7f0;
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.055);
 }
@@ -120,19 +121,47 @@
   gap: 16px;
 }
 
-.chart-grid .chart-panel {
+.chart-grid .chart-panel,
+.chart-grid .panel {
   min-height: 390px;
   padding: 18px;
 }
 
-.chart-head {
+.chart-grid .panel::before {
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  color: #475569;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  margin-bottom: 12px;
+  padding: 4px 9px;
+  text-transform: uppercase;
+}
+
+.chart-grid .panel:nth-child(1)::before {
+  content: 'Porcentaje de consumo';
+}
+
+.chart-grid .panel:nth-child(2)::before {
+  content: 'Valor exacto al pasar el mouse';
+}
+
+.chart-grid .panel:nth-child(3)::before {
+  content: 'Filesystem / unidad';
+}
+
+.chart-head,
+.chart-grid .panel-head {
   align-items: flex-start;
   border-bottom: 1px solid #edf2f7;
   margin-bottom: 12px;
   padding-bottom: 12px;
 }
 
-.chart-head h2 {
+.chart-head h2,
+.chart-grid .panel-head h2 {
   color: #0f172a;
   font-size: 18px;
 }
@@ -143,7 +172,8 @@
   margin-top: 4px;
 }
 
-.chart-head small {
+.chart-head small,
+.chart-grid .panel-head::after {
   background: #f1f5f9;
   border: 1px solid #dde6f0;
   border-radius: 999px;
@@ -152,6 +182,15 @@
   font-weight: 800;
   padding: 5px 9px;
   text-transform: uppercase;
+}
+
+.chart-grid .panel:nth-child(1) .panel-head::after,
+.chart-grid .panel:nth-child(3) .panel-head::after {
+  content: '%';
+}
+
+.chart-grid .panel:nth-child(2) .panel-head::after {
+  content: 'bytes';
 }
 
 .legend {
@@ -174,7 +213,8 @@
   width: 8px;
 }
 
-.chart-frame {
+.chart-frame,
+.chart-hover-panel {
   position: relative;
 }
 
@@ -216,29 +256,41 @@
   vector-effect: non-scaling-stroke;
 }
 
+.hover-cursor-line {
+  background: rgba(15, 23, 42, 0.35);
+  display: none;
+  height: 250px;
+  position: absolute;
+  top: 126px;
+  width: 1px;
+  z-index: 2;
+}
+
+.hover-value-tooltip,
 .chart-tooltip {
-  background: rgba(15, 23, 42, 0.94);
+  background: rgba(15, 23, 42, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   box-shadow: 0 14px 28px rgba(15, 23, 42, 0.25);
   color: #ffffff;
-  display: grid;
+  display: none;
   gap: 7px;
-  min-width: 190px;
+  min-width: 210px;
   padding: 10px 12px;
   pointer-events: none;
   position: absolute;
-  top: 18px;
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: 5;
 }
 
+.hover-value-tooltip strong,
 .chart-tooltip strong {
   border-bottom: 1px solid rgba(255, 255, 255, 0.14);
   font-size: 12px;
   padding-bottom: 6px;
 }
 
+.hover-value-tooltip span,
 .chart-tooltip span {
   align-items: center;
   display: grid;
@@ -247,12 +299,14 @@
   grid-template-columns: 8px 1fr auto;
 }
 
+.hover-value-tooltip i,
 .chart-tooltip i {
   border-radius: 999px;
   height: 8px;
   width: 8px;
 }
 
+.hover-value-tooltip b,
 .chart-tooltip b {
   font-variant-numeric: tabular-nums;
 }
@@ -277,11 +331,13 @@
     grid-template-columns: 1fr;
   }
 
-  .chart-grid .chart-panel {
+  .chart-grid .chart-panel,
+  .chart-grid .panel {
     min-height: 340px;
   }
 
+  .hover-value-tooltip,
   .chart-tooltip {
-    display: none;
+    display: none !important;
   }
 }
