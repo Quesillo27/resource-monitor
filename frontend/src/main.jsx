@@ -145,6 +145,8 @@ function Dashboard({ api }) {
         <Kpi icon={Cpu} label="CPU promedio" value={`${round(stats.avg_cpu_percent)}%`} />
         <Kpi icon={MemoryStick} label="RAM promedio" value={`${round(stats.avg_memory_percent)}%`} />
         <Kpi icon={HardDrive} label="Discos criticos" value={stats.critical_disks ?? 0} tone="bad" />
+        <Kpi icon={Activity} label="Red total" value={bytes(stats.network_total_bytes)} />
+        <Kpi icon={AlertTriangle} label="Servicios caidos" value={stats.services_down ?? 0} tone="bad" />
       </div>
     </section>
   );
@@ -219,6 +221,9 @@ function AgentDetail({ api, agentId, onBack }) {
   const agent = data?.agent;
   const agentStatus = data?.agent_status;
   const disks = data?.disks || [];
+  const networks = data?.networks || [];
+  const processes = data?.processes || [];
+  const services = data?.services || [];
   const history = data?.history || [];
   async function renameAgent() {
     const nextName = window.prompt('Nuevo nombre del equipo', agent?.name || '');
@@ -287,6 +292,52 @@ function AgentDetail({ api, agentId, onBack }) {
               </tbody>
             </table>
           </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Interfaz</th><th>Estado</th><th>Recibido</th><th>Enviado</th></tr></thead>
+              <tbody>
+                {networks.map((network) => (
+                  <tr key={network.name}>
+                    <td>{network.name}</td>
+                    <td>{network.up ? 'up' : 'down'}</td>
+                    <td>{bytes(network.bytes_recv)}</td>
+                    <td>{bytes(network.bytes_sent)}</td>
+                  </tr>
+                ))}
+                {!networks.length && <tr><td colSpan="4" className="empty">Sin muestras de red</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Proceso</th><th>PID</th><th>CPU</th><th>RAM</th></tr></thead>
+              <tbody>
+                {processes.map((proc) => (
+                  <tr key={`${proc.pid}-${proc.name}`}>
+                    <td>{proc.name}</td>
+                    <td>{proc.pid}</td>
+                    <td>{percent(proc.cpu_percent)}</td>
+                    <td>{percent(proc.memory_percent)}</td>
+                  </tr>
+                ))}
+                {!processes.length && <tr><td colSpan="4" className="empty">Sin procesos destacados</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Servicio</th><th>Estado</th></tr></thead>
+              <tbody>
+                {services.map((service) => (
+                  <tr key={service.name}>
+                    <td>{service.name}</td>
+                    <td>{service.status}</td>
+                  </tr>
+                ))}
+                {!services.length && <tr><td colSpan="2" className="empty">Sin servicios configurados</td></tr>}
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </section>
@@ -295,6 +346,7 @@ function AgentDetail({ api, agentId, onBack }) {
 
 function Enrollment({ api }) {
   const [serverUrl, setServerUrl] = useState(API_BASE);
+  const [downloadUrl, setDownloadUrl] = useState(() => defaultDownloadUrl(API_BASE));
   const [agentName, setAgentName] = useState('');
   const [installStyle, setInstallStyle] = useState('linux');
   const [releaseVersion, setReleaseVersion] = useState('latest');
@@ -311,6 +363,7 @@ function Enrollment({ api }) {
         name: agentName || 'Alta agente',
         ttl_hours: 24,
         server_url: serverUrl,
+        download_url: downloadUrl,
         agent_name: agentName,
         install_style: installStyle,
         release_version: releaseVersion,
@@ -328,6 +381,7 @@ function Enrollment({ api }) {
       <Header title="Alta de agente" />
       <form className="enroll-form" onSubmit={createToken}>
         <label>URL del servidor<input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} /></label>
+        <label>URL de descargas LAN<input value={downloadUrl} onChange={(e) => setDownloadUrl(e.target.value)} /></label>
         <label>Nombre del equipo<input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="Opcional" /></label>
         <label>Version del agente<input value={releaseVersion} onChange={(e) => setReleaseVersion(e.target.value)} placeholder="latest" /></label>
         <div className="segmented">
@@ -341,7 +395,7 @@ function Enrollment({ api }) {
         <div className="install-result">
           <div className="install-meta">
             <strong>Token valido hasta {date(result.expires_at)}</strong>
-            <span>Version: {result.release_version || releaseVersion || 'latest'} - Ejecutar como administrador/root.</span>
+            <span>Descarga local: {downloadUrl} - Ejecutar como administrador/root.</span>
           </div>
           <CommandBlock
             title="Linux systemd"
@@ -351,6 +405,15 @@ function Enrollment({ api }) {
             title="Windows PowerShell"
             command={result.windows_install_command || result.install_command}
           />
+          <div className="ops-panel">
+            <h2>Asistente de instalacion</h2>
+            <div className="ops-grid">
+              <code>1. Ejecutar el comando como root/administrador</code>
+              <code>2. Confirmar descarga desde {downloadUrl}</code>
+              <code>3. Validar servicio activo y prueba doctor OK</code>
+              <code>4. Verificar el equipo online en menos de 60 segundos</code>
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -499,6 +562,19 @@ function bytes(value) {
     unit += 1;
   }
   return `${next.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+}
+
+function defaultDownloadUrl(apiBase) {
+  try {
+    const parsed = new URL(apiBase);
+    parsed.port = '3000';
+    parsed.pathname = '/downloads';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString().replace(/\/$/, '');
+  } catch {
+    return 'http://localhost:3000/downloads';
+  }
 }
 
 createRoot(document.getElementById('root')).render(<App />);
