@@ -7,6 +7,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -30,7 +31,11 @@ if (Get-Service resource-monitor-agent -ErrorAction SilentlyContinue) {
 
 $assetUrl = "$baseUrl/resource-monitor-agent-windows-amd64.exe"
 Write-Host "Downloading $assetUrl..."
-Invoke-WebRequest -Uri $assetUrl -OutFile $installPath
+try {
+  Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing
+} catch {
+  throw "Could not download the Windows agent binary from $assetUrl. Wait for the GitHub Release assets to finish publishing, or verify internet/TLS access from this host. Original error: $($_.Exception.Message)"
+}
 
 Write-Host "Registering and installing resource-monitor-agent..."
 & $installPath install --server-url $ServerUrl --enrollment-token $EnrollmentToken --name $Name --interval $Interval
