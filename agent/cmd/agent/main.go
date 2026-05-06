@@ -23,7 +23,7 @@ import (
 
 func main() {
 	if len(os.Args) < 2 {
-		runCmd(os.Args[1:])
+		runCmd(nil)
 		return
 	}
 
@@ -54,6 +54,7 @@ func installCmd(args []string) {
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
+	normalizeFlagConfig(cfg)
 	if cfg.ServerURL == "" {
 		log.Fatal("--server-url is required")
 	}
@@ -139,6 +140,7 @@ func runCmd(args []string) {
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
+	normalizeFlagConfig(cfg)
 
 	loaded, err := config.LoadWithOverrides(*cfg)
 	if err != nil {
@@ -160,6 +162,7 @@ func onceCmd(args []string) {
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
+	normalizeFlagConfig(cfg)
 	loaded, err := config.LoadWithOverrides(*cfg)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -191,7 +194,7 @@ func statusCmd(args []string) {
 	} else {
 		fmt.Printf("service_status=%v\n", status)
 	}
-	fmt.Printf("config=%s\nserver_url=%s\nagent_id=%s\nname=%s\ninterval_seconds=%d\n", *configPath, cfg.ServerURL, cfg.AgentID, cfg.Name, cfg.IntervalSeconds)
+	fmt.Printf("config=%s\nserver_url=%s\nagent_id=%s\nname=%s\ninterval_seconds=%d\nprofile=%s\ninstall_path=%s\n", *configPath, cfg.ServerURL, cfg.AgentID, cfg.Name, cfg.IntervalSeconds, cfg.Profile, config.DefaultInstallPath())
 }
 
 func doctorCmd(args []string) {
@@ -199,6 +202,7 @@ func doctorCmd(args []string) {
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
+	normalizeFlagConfig(cfg)
 	loaded, err := config.LoadWithOverrides(*cfg)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
@@ -207,6 +211,7 @@ func doctorCmd(args []string) {
 		loaded.ConfigPath = config.DefaultServiceConfigPath()
 	}
 	fmt.Printf("config=%s\nserver_url=%s\n", loaded.ConfigPath, loaded.ServerURL)
+	fmt.Printf("profile=%s\ninstall_path=%s\n", loaded.Profile, config.DefaultInstallPath())
 	if loaded.Credential == "" && loaded.EnrollmentToken == "" {
 		log.Fatal("missing credential or enrollment token")
 	}
@@ -224,8 +229,19 @@ func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	fs.StringVar(&cfg.EnrollmentToken, "enrollment-token", "", "one-time enrollment token")
 	fs.StringVar(&cfg.Credential, "credential", "", "agent credential")
 	fs.StringVar(&cfg.Name, "name", "", "agent display name")
+	fs.StringVar(&cfg.Profile, "profile", "", "metrics profile: minimal or balanced")
+	fs.StringVar(&cfg.ServiceChecksCSV, "services", "", "comma-separated process/service names to check")
 	fs.IntVar(&cfg.IntervalSeconds, "interval", 0, "collection interval in seconds")
 	return fs, cfg
+}
+
+func normalizeFlagConfig(cfg *config.Config) {
+	if cfg.Profile == "" {
+		cfg.Profile = "balanced"
+	}
+	if cfg.ServiceChecksCSV != "" {
+		cfg.ServiceChecks = append(cfg.ServiceChecks, config.SplitCSV(cfg.ServiceChecksCSV)...)
+	}
 }
 
 func runLoop(ctx context.Context, cfg config.Config) error {
@@ -282,7 +298,7 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	log.Printf("heartbeat sent for %s", info.Name)
-	metrics, err := collector.Collect(ctx)
+	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {
 		return err
 	}
