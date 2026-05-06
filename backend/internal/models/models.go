@@ -22,10 +22,26 @@ type EnrollmentTokenRequest struct {
 	AgentName      string `json:"agent_name"`
 	InstallStyle   string `json:"install_style"`
 	ReleaseVersion string `json:"release_version"`
+	Profile        string `json:"profile"`
+	Services       string `json:"services"`
+	Interval       int    `json:"interval"`
 }
 
 type AgentUpdateRequest struct {
 	Name string `json:"name"`
+}
+
+type SMTPSettings struct {
+	Enabled         bool   `json:"enabled"`
+	Host            string `json:"host"`
+	Port            int    `json:"port"`
+	Username        string `json:"username"`
+	Password        string `json:"password,omitempty"`
+	FromAddress     string `json:"from_address"`
+	ToAddresses     string `json:"to_addresses"`
+	UseTLS          bool   `json:"use_tls"`
+	UseStartTLS     bool   `json:"use_starttls"`
+	CooldownMinutes int    `json:"cooldown_minutes"`
 }
 
 type AgentRegisterRequest struct {
