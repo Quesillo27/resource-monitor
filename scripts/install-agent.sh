@@ -7,6 +7,9 @@ SERVER_URL=""
 ENROLLMENT_TOKEN=""
 AGENT_NAME=""
 INTERVAL="60"
+AGENT_URL=""
+PROFILE="balanced"
+SERVICES=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -15,6 +18,9 @@ while [[ $# -gt 0 ]]; do
     --name) AGENT_NAME="${2:-}"; shift 2 ;;
     --interval) INTERVAL="${2:-60}"; shift 2 ;;
     --version) VERSION="${2:-latest}"; shift 2 ;;
+    --agent-url) AGENT_URL="${2:-}"; shift 2 ;;
+    --profile) PROFILE="${2:-balanced}"; shift 2 ;;
+    --services) SERVICES="${2:-}"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -54,7 +60,11 @@ trap cleanup EXIT
 systemctl stop resource-monitor-agent 2>/dev/null || true
 
 echo "Downloading ${ASSET} from ${BASE_URL}..."
-if ! curl -fL "${BASE_URL}/${ASSET}" -o "$TMP_BIN"; then
+DOWNLOAD_URL="${BASE_URL}/${ASSET}"
+if [[ -n "$AGENT_URL" ]]; then
+  DOWNLOAD_URL="$AGENT_URL"
+fi
+if ! curl -fL "$DOWNLOAD_URL" -o "$TMP_BIN"; then
   echo "Release binary was not found. Falling back to build from source..."
   if ! command -v git >/dev/null 2>&1; then
     echo "git is required for source fallback. Install git or publish GitHub Release assets." >&2
@@ -75,7 +85,9 @@ echo "Registering and installing resource-monitor-agent..."
   --server-url "$SERVER_URL" \
   --enrollment-token "$ENROLLMENT_TOKEN" \
   --name "$AGENT_NAME" \
-  --interval "$INTERVAL"
+  --interval "$INTERVAL" \
+  --profile "$PROFILE" \
+  --services "$SERVICES"
 
 systemctl daemon-reload
 systemctl enable resource-monitor-agent
