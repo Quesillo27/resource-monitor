@@ -41,6 +41,7 @@ type AlertRule struct {
 	Threshold       float64  `json:"threshold"`
 	DurationSamples int      `json:"duration_samples"`
 	NotifyEmail     bool     `json:"notify_email"`
+	NotifyTelegram  bool     `json:"notify_telegram"`
 	CooldownMinutes int      `json:"cooldown_minutes"`
 	Description     string   `json:"description"`
 	Source          string   `json:"source,omitempty"`
@@ -62,6 +63,40 @@ type SMTPSettings struct {
 	UseTLS          bool   `json:"use_tls"`
 	UseStartTLS     bool   `json:"use_starttls"`
 	CooldownMinutes int    `json:"cooldown_minutes"`
+}
+
+type TelegramSettings struct {
+	Enabled         bool   `json:"enabled"`
+	BotToken        string `json:"bot_token,omitempty"`
+	ChatIDs         string `json:"chat_ids"`
+	ParseMode       string `json:"parse_mode"`
+	CooldownMinutes int    `json:"cooldown_minutes"`
+}
+
+type UserDTO struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	Role      string    `json:"role"`
+	Active    bool      `json:"active"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type UserCreateRequest struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+	Role     string `json:"role"`
+	Active   *bool  `json:"active,omitempty"`
+}
+
+type UserUpdateRequest struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	Active   *bool  `json:"active,omitempty"`
+}
+
+type UserPasswordRequest struct {
+	Password string `json:"password"`
 }
 
 type AgentRegisterRequest struct {
@@ -147,22 +182,24 @@ type Agent struct {
 }
 
 type Alert struct {
-	ID                string       `json:"id"`
-	AgentID           string       `json:"agent_id"`
-	AgentName         string       `json:"agent_name"`
-	Type              string       `json:"type"`
-	Severity          string       `json:"severity"`
-	Message           string       `json:"message"`
-	ResourceKey       string       `json:"resource_key"`
-	RuleID            *string      `json:"rule_id,omitempty"`
-	ObservedValue     *float64     `json:"observed_value,omitempty"`
-	ThresholdValue    *float64     `json:"threshold_value,omitempty"`
-	Unit              string       `json:"unit,omitempty"`
-	DurationSamples   int          `json:"duration_samples,omitempty"`
-	NotifyEmail       bool         `json:"notify_email"`
-	NotificationCount int          `json:"notification_count"`
-	ProcessSnapshot   []ProcMetric `json:"process_snapshot,omitempty"`
-	Active            bool         `json:"active"`
-	OpenedAt          time.Time    `json:"opened_at"`
-	ResolvedAt        *time.Time   `json:"resolved_at"`
+	ID                        string       `json:"id"`
+	AgentID                   string       `json:"agent_id"`
+	AgentName                 string       `json:"agent_name"`
+	Type                      string       `json:"type"`
+	Severity                  string       `json:"severity"`
+	Message                   string       `json:"message"`
+	ResourceKey               string       `json:"resource_key"`
+	RuleID                    *string      `json:"rule_id,omitempty"`
+	ObservedValue             *float64     `json:"observed_value,omitempty"`
+	ThresholdValue            *float64     `json:"threshold_value,omitempty"`
+	Unit                      string       `json:"unit,omitempty"`
+	DurationSamples           int          `json:"duration_samples,omitempty"`
+	NotifyEmail               bool         `json:"notify_email"`
+	NotifyTelegram            bool         `json:"notify_telegram"`
+	NotificationCount         int          `json:"notification_count"`
+	TelegramNotificationCount int          `json:"telegram_notification_count"`
+	ProcessSnapshot           []ProcMetric `json:"process_snapshot,omitempty"`
+	Active                    bool         `json:"active"`
+	OpenedAt                  time.Time    `json:"opened_at"`
+	ResolvedAt                *time.Time   `json:"resolved_at"`
 }
