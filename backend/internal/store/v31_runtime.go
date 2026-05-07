@@ -109,7 +109,11 @@ func (s *Store) ListAlertsV31(ctx context.Context, activeOnly bool) ([]models.Al
 		return nil, err
 	}
 	defer rows.Close()
-	return scanAlertsV31(rows)
+	alerts, err := scanAlertsV31(rows)
+	if err != nil {
+		return nil, err
+	}
+	return s.withAlertProcessSnapshots(ctx, alerts)
 }
 
 func (s *Store) AgentAlertsV31(ctx context.Context, agentID string) ([]models.Alert, error) {
@@ -121,7 +125,11 @@ func (s *Store) AgentAlertsV31(ctx context.Context, agentID string) ([]models.Al
 		return nil, err
 	}
 	defer rows.Close()
-	return scanAlertsV31(rows)
+	alerts, err := scanAlertsV31(rows)
+	if err != nil {
+		return nil, err
+	}
+	return s.withAlertProcessSnapshots(ctx, alerts)
 }
 
 func alertSelectV31() string {
@@ -204,7 +212,11 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		return rows.Err()
 	}
 	for _, alert := range pending {
-		body := fmt.Sprintf("Equipo: %s\nSeveridad: %s\nAlerta: %s\nApertura: %s\n", alert.agent, alert.severity, alert.message, alert.openedAt.Format(time.RFC3339))
+		processes, err := s.alertProcessSnapshot(ctx, alert.id)
+		if err != nil {
+			return err
+		}
+		body := fmt.Sprintf("Equipo: %s\nSeveridad: %s\nAlerta: %s\nApertura: %s\n%s", alert.agent, alert.severity, alert.message, alert.openedAt.Format(time.RFC3339), processSnapshotText(processes))
 		if err := sendMailV3(cfg, "Resource Monitor alerta "+strings.ToUpper(alert.severity), body); err != nil {
 			return err
 		}
@@ -228,5 +240,8 @@ func (s *Store) ensureAlertRuntimeSchemas(ctx context.Context) error {
 	if err := s.EnsureV3Schema(ctx); err != nil {
 		return err
 	}
-	return s.ensureAlertRulesSchema(ctx)
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return err
+	}
+	return s.ensureAlertContextSchema(ctx)
 }
