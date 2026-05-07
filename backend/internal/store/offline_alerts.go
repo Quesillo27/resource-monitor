@@ -11,6 +11,9 @@ import (
 )
 
 func (s *Store) EvaluateOfflineAlerts(ctx context.Context, offlineAfterSeconds int) error {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return err
+	}
 	if err := s.ensureOfflineAlertDefaults(ctx); err != nil {
 		return err
 	}
