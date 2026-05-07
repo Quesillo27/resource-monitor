@@ -69,7 +69,7 @@
 
   function findAlertForCard(card) {
     const text = card.textContent || '';
-    return latestAlerts.find((alert) => !seenIds.has(alert.id) && text.includes(alert.message)) || null;
+    return latestAlerts.find((item) => !seenIds.has(item.id) && text.includes(item.message)) || null;
   }
 
   function addClearButton() {
@@ -87,12 +87,12 @@
       btn.textContent = 'Limpiando...';
       try {
         await api('/api/alerts/seen-all', { method: 'POST', body: '{}' });
-        latestAlerts.forEach((alert) => seenIds.add(alert.id));
+        latestAlerts.forEach((item) => seenIds.add(item.id));
         document.querySelectorAll('.alert-card').forEach((card) => card.remove());
         updateLabels();
         setTimeout(() => location.reload(), 250);
       } catch (err) {
-        alert(err.message);
+        window.alert(err.message);
         btn.disabled = false;
         btn.textContent = 'Limpiar todo';
       }
@@ -107,20 +107,20 @@
     addClearButton();
     document.querySelectorAll('.alert-card').forEach((card) => {
       if (card.dataset.rmSeenReady === '1') return;
-      const alert = findAlertForCard(card);
-      if (!alert) return;
+      const item = findAlertForCard(card);
+      if (!item) return;
       card.dataset.rmSeenReady = '1';
       const body = card.querySelector('div') || card;
       const status = document.createElement('span');
-      status.className = `rm-alert-status ${alert.active ? 'active' : 'resolved'}`;
-      status.textContent = alert.active ? 'activa' : 'resuelta';
+      status.className = `rm-alert-status ${item.active ? 'active' : 'resolved'}`;
+      status.textContent = item.active ? 'activa' : 'resuelta';
       body.appendChild(status);
-      if (alert.resolved_at) {
+      if (item.resolved_at) {
         const resolved = document.createElement('small');
-        resolved.textContent = `Resuelta: ${new Date(alert.resolved_at).toLocaleString()}`;
+        resolved.textContent = `Resuelta: ${new Date(item.resolved_at).toLocaleString()}`;
         body.appendChild(resolved);
       }
-      if (!alert.seen_at) {
+      if (!item.seen_at) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'rm-seen-btn';
@@ -129,12 +129,12 @@
           btn.disabled = true;
           btn.textContent = 'Guardando...';
           try {
-            await api(`/api/alerts/${alert.id}/seen`, { method: 'POST', body: '{}' });
-            seenIds.add(alert.id);
+            await api(`/api/alerts/${item.id}/seen`, { method: 'POST', body: '{}' });
+            seenIds.add(item.id);
             card.remove();
             updateLabels();
           } catch (err) {
-            alert(err.message);
+            window.alert(err.message);
             btn.disabled = false;
             btn.textContent = 'Visto';
           }
