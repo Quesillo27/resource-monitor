@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"resource-monitor/backend/internal/models"
 )
@@ -15,6 +16,7 @@ const (
 	metricDisk        = "disk_used_percent"
 	metricNetworkRecv = "network_recv_mbps"
 	metricNetworkSent = "network_sent_mbps"
+	metricOffline     = "agent_offline_minutes"
 )
 
 func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
@@ -65,7 +67,9 @@ func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 			('network_recv_mbps', '', 'warning', false, 0, 2, false, false, 30, 'Red recibida sobre umbral warning'),
 			('network_recv_mbps', '', 'critical', false, 0, 2, true, false, 30, 'Red recibida sobre umbral critical'),
 			('network_sent_mbps', '', 'warning', false, 0, 2, false, false, 30, 'Red enviada sobre umbral warning'),
-			('network_sent_mbps', '', 'critical', false, 0, 2, true, false, 30, 'Red enviada sobre umbral critical')
+			('network_sent_mbps', '', 'critical', false, 0, 2, true, false, 30, 'Red enviada sobre umbral critical'),
+			('agent_offline_minutes', '', 'warning', true, 3, 1, false, false, 30, 'Equipo sin conexion warning'),
+			('agent_offline_minutes', '', 'critical', true, 10, 1, true, false, 30, 'Equipo sin conexion critical')
 		 ON CONFLICT DO NOTHING`,
 	}
 	for _, statement := range statements {
@@ -274,6 +278,15 @@ func (s *Store) currentRuleValues(ctx context.Context, agentID string) (map[stri
 		values[metricDisk+":"+key+":warning"] = disk.UsedPercent
 		values[metricDisk+":"+key+":critical"] = disk.UsedPercent
 	}
+	var lastSeenAt *time.Time
+	if err := s.pool.QueryRow(ctx, "SELECT last_seen_at FROM agents WHERE id = $1", agentID).Scan(&lastSeenAt); err == nil {
+		minutes := 0.0
+		if lastSeenAt != nil {
+			minutes = time.Since(*lastSeenAt).Minutes()
+		}
+		values[metricOffline+"::warning"] = minutes
+		values[metricOffline+"::critical"] = minutes
+	}
 	return values, nil
 }
 
@@ -306,7 +319,7 @@ func ruleKey(rule models.AlertRule) string {
 
 func validAlertMetric(metric string) bool {
 	switch metric {
-	case metricCPU, metricRAM, metricDisk, metricNetworkRecv, metricNetworkSent:
+	case metricCPU, metricRAM, metricDisk, metricNetworkRecv, metricNetworkSent, metricOffline:
 		return true
 	default:
 		return false
@@ -329,6 +342,8 @@ func alertMetricOrder(metric string) int {
 		return 4
 	case metricDisk:
 		return 5
+	case metricOffline:
+		return 6
 	default:
 		return 99
 	}
