@@ -147,21 +147,22 @@ type Agent struct {
 }
 
 type Alert struct {
-	ID                string     `json:"id"`
-	AgentID           string     `json:"agent_id"`
-	AgentName         string     `json:"agent_name"`
-	Type              string     `json:"type"`
-	Severity          string     `json:"severity"`
-	Message           string     `json:"message"`
-	ResourceKey       string     `json:"resource_key"`
-	RuleID            *string    `json:"rule_id,omitempty"`
-	ObservedValue     *float64   `json:"observed_value,omitempty"`
-	ThresholdValue    *float64   `json:"threshold_value,omitempty"`
-	Unit              string     `json:"unit,omitempty"`
-	DurationSamples   int        `json:"duration_samples,omitempty"`
-	NotifyEmail       bool       `json:"notify_email"`
-	NotificationCount int        `json:"notification_count"`
-	Active            bool       `json:"active"`
-	OpenedAt          time.Time  `json:"opened_at"`
-	ResolvedAt        *time.Time `json:"resolved_at"`
+	ID                string       `json:"id"`
+	AgentID           string       `json:"agent_id"`
+	AgentName         string       `json:"agent_name"`
+	Type              string       `json:"type"`
+	Severity          string       `json:"severity"`
+	Message           string       `json:"message"`
+	ResourceKey       string       `json:"resource_key"`
+	RuleID            *string      `json:"rule_id,omitempty"`
+	ObservedValue     *float64     `json:"observed_value,omitempty"`
+	ThresholdValue    *float64     `json:"threshold_value,omitempty"`
+	Unit              string       `json:"unit,omitempty"`
+	DurationSamples   int          `json:"duration_samples,omitempty"`
+	NotifyEmail       bool         `json:"notify_email"`
+	NotificationCount int          `json:"notification_count"`
+	ProcessSnapshot   []ProcMetric `json:"process_snapshot,omitempty"`
+	Active            bool         `json:"active"`
+	OpenedAt          time.Time    `json:"opened_at"`
+	ResolvedAt        *time.Time   `json:"resolved_at"`
 }
