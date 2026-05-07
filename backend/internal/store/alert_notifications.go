@@ -41,15 +41,7 @@ func (s *Store) ListAlertNotifications(ctx context.Context, seenFilter, activeFi
 	}
 	seenFilter = normalizeAlertNotificationFilter(seenFilter, "false")
 	activeFilter = normalizeAlertNotificationFilter(activeFilter, "all")
-	rows, err := s.pool.Query(ctx, `
-		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
-		       al.resource_key, COALESCE(al.rule_id::text, ''), al.observed_value, al.threshold_value, al.unit,
-		       al.duration_samples, al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
-		       al.process_snapshot,
-		       al.active, al.opened_at, al.resolved_at, al.seen_at,
-		       COALESCE(al.seen_by_user_id::text, ''), COALESCE(al.seen_by_username, '')
-		FROM alerts al
-		JOIN agents a ON a.id = al.agent_id
+	rows, err := s.pool.Query(ctx, alertNotificationSelect()+`
 		WHERE ($1 = 'all' OR ($1 = 'false' AND al.seen_at IS NULL) OR ($1 = 'true' AND al.seen_at IS NOT NULL))
 		  AND ($2 = 'all' OR ($2 = 'false' AND al.active = false) OR ($2 = 'true' AND al.active = true))
 		ORDER BY (al.seen_at IS NULL) DESC, al.active DESC, al.opened_at DESC
@@ -58,22 +50,18 @@ func (s *Store) ListAlertNotifications(ctx context.Context, seenFilter, activeFi
 		return nil, err
 	}
 	defer rows.Close()
-	return scanAlertNotifications(rows)
+	alerts, err := scanAlertNotifications(rows)
+	if err != nil {
+		return nil, err
+	}
+	return s.withAlertProcessSnapshots(ctx, alerts)
 }
 
 func (s *Store) AgentAlertNotifications(ctx context.Context, agentID string) ([]models.Alert, error) {
 	if err := s.ensureAlertNotificationSchema(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
-		       al.resource_key, COALESCE(al.rule_id::text, ''), al.observed_value, al.threshold_value, al.unit,
-		       al.duration_samples, al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
-		       al.process_snapshot,
-		       al.active, al.opened_at, al.resolved_at, al.seen_at,
-		       COALESCE(al.seen_by_user_id::text, ''), COALESCE(al.seen_by_username, '')
-		FROM alerts al
-		JOIN agents a ON a.id = al.agent_id
+	rows, err := s.pool.Query(ctx, alertNotificationSelect()+`
 		WHERE al.agent_id = $1 AND (al.seen_at IS NULL OR al.active = true)
 		ORDER BY (al.seen_at IS NULL) DESC, al.active DESC, al.severity = 'critical' DESC, al.opened_at DESC
 	`, agentID)
@@ -81,7 +69,23 @@ func (s *Store) AgentAlertNotifications(ctx context.Context, agentID string) ([]
 		return nil, err
 	}
 	defer rows.Close()
-	return scanAlertNotifications(rows)
+	alerts, err := scanAlertNotifications(rows)
+	if err != nil {
+		return nil, err
+	}
+	return s.withAlertProcessSnapshots(ctx, alerts)
+}
+
+func alertNotificationSelect() string {
+	return `
+		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
+		       al.resource_key, COALESCE(al.rule_id::text, ''), al.observed_value, al.threshold_value, al.unit,
+		       al.duration_samples, al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
+		       al.active, al.opened_at, al.resolved_at, al.seen_at,
+		       COALESCE(al.seen_by_user_id::text, ''), COALESCE(al.seen_by_username, '')
+		FROM alerts al
+		JOIN agents a ON a.id = al.agent_id
+	`
 }
 
 func scanAlertNotifications(rows interface {
@@ -93,7 +97,7 @@ func scanAlertNotifications(rows interface {
 	for rows.Next() {
 		var alert models.Alert
 		var ruleID, seenByUserID, seenByUsername string
-		if err := rows.Scan(&alert.ID, &alert.AgentID, &alert.AgentName, &alert.Type, &alert.Severity, &alert.Message, &alert.ResourceKey, &ruleID, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotifyTelegram, &alert.NotificationCount, &alert.TelegramNotificationCount, &alert.ProcessSnapshot, &alert.Active, &alert.OpenedAt, &alert.ResolvedAt, &alert.SeenAt, &seenByUserID, &seenByUsername); err != nil {
+		if err := rows.Scan(&alert.ID, &alert.AgentID, &alert.AgentName, &alert.Type, &alert.Severity, &alert.Message, &alert.ResourceKey, &ruleID, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotifyTelegram, &alert.NotificationCount, &alert.TelegramNotificationCount, &alert.Active, &alert.OpenedAt, &alert.ResolvedAt, &alert.SeenAt, &seenByUserID, &seenByUsername); err != nil {
 			return nil, err
 		}
 		if ruleID != "" {
