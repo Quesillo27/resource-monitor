@@ -41,6 +41,7 @@
 
   let activeTab = 'smtp';
   let usersCache = [];
+  let lastToken = '';
 
   function token() { return localStorage.getItem('rm_token') || ''; }
   function decodeRole() { try { return JSON.parse(atob(token().split('.')[1] || '')).role || 'viewer'; } catch { return 'viewer'; } }
@@ -62,14 +63,33 @@
       document.getElementById('rm-settings-backdrop').onclick = closeSettings;
     }
   }
+  function removeNav() {
+    document.querySelectorAll('.rm-settings-nav').forEach((el) => el.remove());
+  }
+  function syncNav() {
+    const currentToken = token();
+    if (currentToken !== lastToken) {
+      lastToken = currentToken;
+      activeTab = 'smtp';
+      closeSettings();
+      removeNav();
+    }
+    if (!currentToken || decodeRole() !== 'admin') {
+      closeSettings();
+      removeNav();
+      return;
+    }
+    addNav();
+  }
   function addNav() {
+    if (decodeRole() !== 'admin') return;
     if (document.querySelector('.rm-settings-nav')) return;
     const aside = document.querySelector('aside') || document.querySelector('[class*=sidebar]') || document.querySelector('#root nav');
     if (!aside) return;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'rm-settings-nav';
-    btn.innerHTML = '<span>⚙</span><span>Configuración</span>';
+    btn.innerHTML = '<span>\u2699</span><span>Configuraci\u00f3n</span>';
     btn.onclick = (event) => { event.preventDefault(); event.stopPropagation(); openSettings('smtp'); };
     const logout = [...aside.querySelectorAll('button,a')].find(el => /salir/i.test(el.textContent || ''));
     if (logout?.parentNode) logout.parentNode.insertBefore(btn, logout); else aside.appendChild(btn);
@@ -131,7 +151,8 @@
   }
 
   ensureShell();
-  new MutationObserver(addNav).observe(document.documentElement, { childList:true, subtree:true });
-  setInterval(addNav, 1000);
-  addNav();
+  new MutationObserver(syncNav).observe(document.documentElement, { childList:true, subtree:true });
+  window.addEventListener('storage', syncNav);
+  setInterval(syncNav, 500);
+  syncNav();
 })();
