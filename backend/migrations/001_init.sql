@@ -114,13 +114,62 @@ CREATE TABLE IF NOT EXISTS alerts (
   resolved_at TIMESTAMPTZ,
   last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   last_notified_at TIMESTAMPTZ,
-  notification_count INTEGER NOT NULL DEFAULT 0
+  notification_count INTEGER NOT NULL DEFAULT 0,
+  rule_id UUID,
+  observed_value DOUBLE PRECISION,
+  threshold_value DOUBLE PRECISION,
+  unit TEXT NOT NULL DEFAULT '',
+  duration_samples INTEGER NOT NULL DEFAULT 1,
+  notify_email BOOLEAN NOT NULL DEFAULT false,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 30
 );
 
 CREATE INDEX IF NOT EXISTS alerts_active_idx ON alerts(active, severity);
 CREATE UNIQUE INDEX IF NOT EXISTS alerts_one_active_resource_idx
   ON alerts(agent_id, type, resource_key)
   WHERE active = true;
+
+CREATE TABLE IF NOT EXISTS alert_rules (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  agent_id UUID REFERENCES agents(id) ON DELETE CASCADE,
+  metric TEXT NOT NULL,
+  resource_key TEXT NOT NULL DEFAULT '',
+  severity TEXT NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT true,
+  threshold DOUBLE PRECISION NOT NULL DEFAULT 0,
+  duration_samples INTEGER NOT NULL DEFAULT 2,
+  notify_email BOOLEAN NOT NULL DEFAULT false,
+  cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+  description TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS alert_rules_scope_metric_idx
+  ON alert_rules ((COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)), metric, resource_key, severity);
+
+CREATE TABLE IF NOT EXISTS alert_rule_matches (
+  agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+  resource_key TEXT NOT NULL DEFAULT '',
+  consecutive_count INTEGER NOT NULL DEFAULT 0,
+  last_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (agent_id, rule_id, resource_key)
+);
+
+INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description) VALUES
+  ('cpu', '', 'warning', true, 85, 2, false, 30, 'CPU sobre umbral warning'),
+  ('cpu', '', 'critical', true, 95, 2, true, 30, 'CPU sobre umbral critical'),
+  ('ram', '', 'warning', true, 85, 2, false, 30, 'RAM sobre umbral warning'),
+  ('ram', '', 'critical', true, 95, 2, true, 30, 'RAM sobre umbral critical'),
+  ('disk_used_percent', '', 'warning', true, 80, 2, false, 30, 'Disco sobre umbral warning'),
+  ('disk_used_percent', '', 'critical', true, 90, 2, true, 30, 'Disco sobre umbral critical'),
+  ('network_recv_mbps', '', 'warning', false, 0, 2, false, 30, 'Red recibida sobre umbral warning'),
+  ('network_recv_mbps', '', 'critical', false, 0, 2, true, 30, 'Red recibida sobre umbral critical'),
+  ('network_sent_mbps', '', 'warning', false, 0, 2, false, 30, 'Red enviada sobre umbral warning'),
+  ('network_sent_mbps', '', 'critical', false, 0, 2, true, 30, 'Red enviada sobre umbral critical')
+ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS smtp_settings (
   id INTEGER PRIMARY KEY DEFAULT 1,
