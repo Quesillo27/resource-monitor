@@ -44,15 +44,15 @@ func (s *Store) EvaluateOfflineAlerts(ctx context.Context, offlineAfterSeconds i
 			return err
 		}
 	}
-	_ = s.NotifyDueAlerts(ctx)
+	_ = s.NotifyDueAlertsV31(ctx)
 	return nil
 }
 
 func (s *Store) ensureOfflineAlertDefaults(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description) VALUES
-			('agent_offline_minutes', '', 'warning', true, 3, 1, false, 30, 'Equipo sin conexion warning'),
-			('agent_offline_minutes', '', 'critical', true, 10, 1, true, 30, 'Equipo sin conexion critical')
+		INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, notify_telegram, cooldown_minutes, description) VALUES
+			('agent_offline_minutes', '', 'warning', true, 3, 1, false, false, 30, 'Equipo sin conexion warning'),
+			('agent_offline_minutes', '', 'critical', true, 10, 1, true, false, 30, 'Equipo sin conexion critical')
 		ON CONFLICT DO NOTHING
 	`)
 	return err
@@ -112,7 +112,7 @@ func (s *Store) evaluateAgentOfflineAlert(ctx context.Context, agentID, agentNam
 		if agentName != "" {
 			message = agentName + ": " + message
 		}
-		if err := upsertRuleAlert(ctx, tx, agentID, *rule, value, count, message); err != nil {
+		if err := upsertRuleAlert(ctx, tx, agentID, *rule, value, count, message, nil); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "UPDATE agents SET status = $2, updated_at = now() WHERE id = $1", agentID, severityStatus(rule.Severity)); err != nil {
