@@ -13,6 +13,7 @@ import (
 )
 
 type userIDKey struct{}
+type usernameKey struct{}
 type userRoleKey struct{}
 type agentIDKey struct{}
 
@@ -69,6 +70,7 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 			role = "viewer"
 		}
 		ctx := context.WithValue(r.Context(), userIDKey{}, c.UserID)
+		ctx = context.WithValue(ctx, usernameKey{}, c.Username)
 		ctx = context.WithValue(ctx, userRoleKey{}, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
