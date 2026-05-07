@@ -13,19 +13,26 @@ import (
 )
 
 type userIDKey struct{}
+type userRoleKey struct{}
 type agentIDKey struct{}
 
 type claims struct {
 	UserID   string `json:"uid"`
 	Username string `json:"username"`
+	Role     string `json:"role"`
 	jwt.RegisteredClaims
 }
 
 func (s *Server) issueJWT(user *store.User) (string, error) {
 	now := time.Now()
+	role, err := s.store.UserRole(context.Background(), user.ID)
+	if err != nil || role == "" {
+		role = "admin"
+	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
 		UserID:   user.ID,
 		Username: user.Username,
+		Role:     role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   user.ID,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -54,9 +61,34 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "invalid bearer token")
 			return
 		}
+		role := c.Role
+		if role == "" {
+			role, _ = s.store.UserRole(r.Context(), c.UserID)
+		}
+		if role == "" {
+			role = "viewer"
+		}
 		ctx := context.WithValue(r.Context(), userIDKey{}, c.UserID)
+		ctx = context.WithValue(ctx, userRoleKey{}, role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (s *Server) requireRole(roles ...string) func(http.Handler) http.Handler {
+	allowed := map[string]bool{}
+	for _, role := range roles {
+		allowed[strings.ToLower(role)] = true
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			role, _ := r.Context().Value(userRoleKey{}).(string)
+			if !allowed[strings.ToLower(role)] {
+				writeError(w, http.StatusForbidden, "insufficient permissions")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *Server) requireAgent(next http.Handler) http.Handler {
