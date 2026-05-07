@@ -20,7 +20,23 @@
     document.head.appendChild(style);
   }
   function onAlertsPage(){ return [...document.querySelectorAll('h1,h2')].some(h=>/alertas|pendientes de visto/i.test(h.textContent||'')); }
+  function hideAlertsSMTP(){
+    const title=[...document.querySelectorAll('h1')].find(h=>/^\s*alertas\s*$/i.test(h.textContent||''));
+    if(!title) return;
+    const row=title.closest('section')?.querySelector('.tab-row');
+    if(!row) return;
+    const buttons=[...row.querySelectorAll('button')];
+    const first=buttons.find(btn=>!/smtp/i.test(btn.textContent||''));
+    const smtp=buttons.find(btn=>/smtp/i.test(btn.textContent||''));
+    if(smtp){
+      if(smtp.classList.contains('selected') && first) setTimeout(()=>first.click(),0);
+      smtp.remove();
+    }
+    const smtpPanel=[...document.querySelectorAll('.panel')].find(panel=>/configuracion smtp|configuración smtp/i.test(panel.textContent||''));
+    if(smtpPanel && first){ setTimeout(()=>first.click(),0); }
+  }
   function updateLabels(){
+    hideAlertsSMTP();
     document.querySelectorAll('.panel h2').forEach(h=>{ if(/alertas web|ultimas alertas|últimas alertas/i.test(h.textContent||'')) h.textContent='Pendientes de visto'; });
     document.querySelectorAll('.empty-panel').forEach(el=>{ if(/sin alertas activas/i.test(el.textContent||'')) el.textContent='Sin notificaciones pendientes'; });
     document.querySelectorAll('.tab-row button').forEach(btn=>{ if(/alertas activas/i.test(btn.textContent||'')) btn.textContent='Pendientes de visto'; });
