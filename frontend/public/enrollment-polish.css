@@ -1,0 +1,250 @@
+.enrollment-page .page-header,
+main > section:has(.wizard) .page-header {
+  align-items: flex-start;
+  gap: 6px;
+  justify-content: flex-start;
+  margin-bottom: 22px;
+}
+
+main > section:has(.wizard) .page-header h1 {
+  line-height: 1.05;
+}
+
+main > section:has(.wizard) .page-header::after {
+  color: #66758a;
+  content: "Genera un comando de instalacion para Windows o Linux";
+  display: block;
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.wizard {
+  align-items: start !important;
+  display: grid !important;
+  gap: 20px !important;
+  grid-template-columns: minmax(420px, 720px) minmax(300px, 1fr) !important;
+  max-width: 1280px;
+}
+
+.enroll-form {
+  display: grid !important;
+  gap: 12px !important;
+}
+
+.wizard-step {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%) !important;
+  border: 1px solid #dce7f4 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045) !important;
+  display: grid !important;
+  gap: 10px 14px !important;
+  grid-template-columns: 34px 1fr !important;
+  padding: 16px !important;
+}
+
+.wizard-step > strong {
+  background: #eaf3ff !important;
+  color: #155db1 !important;
+  font-size: 13px !important;
+  font-weight: 800 !important;
+  height: 30px !important;
+  width: 30px !important;
+}
+
+.wizard-step h2 {
+  color: #071936;
+  font-size: 15px;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+
+.wizard-step label {
+  color: #42526b;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.wizard-step input,
+.wizard-step select {
+  background: #fff;
+  border-color: #cbd9ea;
+  border-radius: 8px;
+  min-height: 42px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.wizard-step input:focus,
+.wizard-step select:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
+  outline: none;
+}
+
+.wizard-step .form-grid {
+  gap: 12px;
+}
+
+.wizard-step .segmented {
+  background: #f5f8fc;
+  border: 1px solid #dce7f4;
+  border-radius: 10px;
+  display: inline-grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  padding: 4px;
+  width: fit-content;
+}
+
+.wizard-step .segmented button {
+  border: 0;
+  border-radius: 8px;
+  font-weight: 800;
+  min-height: 36px;
+}
+
+.wizard-step .segmented .selected {
+  background: #ffffff;
+  border: 1px solid #b9d5fb;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
+}
+
+.enroll-form > .primary {
+  box-shadow: 0 12px 22px rgba(24, 100, 171, 0.18);
+  min-height: 46px;
+}
+
+.wizard > .panel {
+  background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+  border-color: #dce7f4;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.07);
+  position: sticky;
+  top: 18px;
+}
+
+.wizard > .panel .panel-head {
+  border-bottom: 1px solid #eef3f8;
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.check-list {
+  gap: 11px !important;
+}
+
+.check-list span {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #42526b !important;
+  display: flex;
+  font-size: 14px;
+  gap: 9px;
+  padding: 6px 0;
+}
+
+.check-list svg {
+  background: #ecfdf5;
+  border-radius: 999px;
+  color: #0c6e4f !important;
+  padding: 2px;
+}
+
+.install-result {
+  display: grid !important;
+  gap: 14px !important;
+  margin-top: 20px !important;
+  max-width: 1280px;
+}
+
+.install-meta {
+  align-items: center;
+  display: flex !important;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 16px !important;
+}
+
+.install-meta strong {
+  color: #071936;
+}
+
+.install-meta span {
+  background: #f4f7fb;
+  border: 1px solid #dfe8f3;
+  border-radius: 8px;
+  color: #31415b !important;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px !important;
+  max-width: 55%;
+  padding: 8px 10px;
+}
+
+.command-box {
+  align-items: center !important;
+  border-color: #dce7f4 !important;
+  display: flex !important;
+  gap: 14px !important;
+  justify-content: space-between !important;
+  padding: 16px !important;
+}
+
+.command-box > div {
+  min-width: 0;
+  width: 100%;
+}
+
+.command-box span {
+  color: #31415b !important;
+  display: block;
+  font-size: 13px !important;
+  font-weight: 800;
+}
+
+.command-box code {
+  border-radius: 8px !important;
+  margin-top: 8px !important;
+  max-height: 150px;
+}
+
+@media (max-width: 1100px) {
+  .wizard {
+    grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr) !important;
+    max-width: none;
+  }
+
+  .wizard-step {
+    padding: 14px !important;
+  }
+}
+
+@media (max-width: 860px) {
+  .wizard {
+    grid-template-columns: 1fr !important;
+  }
+
+  .wizard > .panel {
+    position: static;
+  }
+
+  .wizard-step {
+    grid-template-columns: 30px 1fr !important;
+  }
+
+  .wizard-step .segmented {
+    width: 100%;
+  }
+
+  .install-meta,
+  .command-box {
+    align-items: stretch !important;
+    flex-direction: column;
+  }
+
+  .install-meta span {
+    max-width: none;
+  }
+
+  .command-box .icon-button {
+    align-self: flex-end;
+  }
+}
