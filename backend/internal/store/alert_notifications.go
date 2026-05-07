@@ -8,6 +8,9 @@ import (
 )
 
 func (s *Store) ensureAlertNotificationSchema(ctx context.Context) error {
+	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
+		return err
+	}
 	statements := []string{
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_by_user_id UUID REFERENCES users(id)",
