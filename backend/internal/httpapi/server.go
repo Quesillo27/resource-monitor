@@ -46,17 +46,29 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents/{id}/history", s.agentHistory)
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
-			r.Put("/agents/{id}/alert-rules", s.saveAgentAlertRules)
-			r.Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
-			r.Patch("/agents/{id}", s.updateAgent)
-			r.Delete("/agents/{id}", s.deleteAgent)
-			r.Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/alerts", s.listAlerts)
 			r.Get("/alert-rules/defaults", s.defaultAlertRules)
-			r.Put("/alert-rules/defaults", s.saveDefaultAlertRules)
-			r.Get("/alert-settings/smtp", s.getSMTPSettings)
-			r.Put("/alert-settings/smtp", s.saveSMTPSettings)
-			r.Post("/alert-settings/smtp/test", s.testSMTPSettings)
+
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/alert-rules", s.saveAgentAlertRules)
+			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
+			r.With(s.requireRole("admin", "operator")).Patch("/agents/{id}", s.updateAgent)
+			r.With(s.requireRole("admin", "operator")).Delete("/agents/{id}", s.deleteAgent)
+			r.With(s.requireRole("admin", "operator")).Post("/enrollment-tokens", s.createEnrollmentToken)
+
+			r.With(s.requireRole("admin")).Put("/alert-rules/defaults", s.saveDefaultAlertRules)
+			r.With(s.requireRole("admin")).Get("/alert-settings/smtp", s.getSMTPSettings)
+			r.With(s.requireRole("admin")).Put("/alert-settings/smtp", s.saveSMTPSettings)
+			r.With(s.requireRole("admin")).Post("/alert-settings/smtp/test", s.testSMTPSettings)
+			r.With(s.requireRole("admin")).Get("/settings/smtp", s.getSMTPSettings)
+			r.With(s.requireRole("admin")).Put("/settings/smtp", s.saveSMTPSettings)
+			r.With(s.requireRole("admin")).Post("/settings/smtp/test", s.testSMTPSettings)
+			r.With(s.requireRole("admin")).Get("/settings/telegram", s.getTelegramSettings)
+			r.With(s.requireRole("admin")).Put("/settings/telegram", s.saveTelegramSettings)
+			r.With(s.requireRole("admin")).Post("/settings/telegram/test", s.testTelegramSettings)
+			r.With(s.requireRole("admin")).Get("/users", s.listUsers)
+			r.With(s.requireRole("admin")).Post("/users", s.createUser)
+			r.With(s.requireRole("admin")).Patch("/users/{id}", s.updateUser)
+			r.With(s.requireRole("admin")).Post("/users/{id}/password", s.updateUserPassword)
 		})
 
 		r.Post("/agent/register", s.registerAgent)
@@ -75,7 +87,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	user, err := s.store.AuthenticateUser(r.Context(), req.Username, req.Password)
+	user, err := s.store.AuthenticateUserV32(r.Context(), req.Username, req.Password)
 	if errors.Is(err, store.ErrUnauthorized) {
 		writeError(w, http.StatusUnauthorized, "invalid username or password")
 		return
@@ -84,12 +96,13 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "login failed")
 		return
 	}
+	role, _ := s.store.UserRole(r.Context(), user.ID)
 	token, err := s.issueJWT(user)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "token failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": map[string]string{"id": user.ID, "username": user.Username}})
+	writeJSON(w, http.StatusOK, map[string]any{"token": token, "user": map[string]string{"id": user.ID, "username": user.Username, "role": role}})
 }
 
 func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +119,13 @@ func (s *Server) dashboardOverview(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "overview failed")
 		return
+	}
+	if alerts, err := s.store.ListAlertsV31(r.Context(), true); err == nil {
+		if len(alerts) > 8 {
+			alerts = alerts[:8]
+		}
+		overview["recent_alerts"] = alerts
+		overview["alert_center"] = alerts
 	}
 	writeJSON(w, http.StatusOK, overview)
 }
@@ -317,6 +337,104 @@ func (s *Server) testSMTPSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (s *Server) getTelegramSettings(w http.ResponseWriter, r *http.Request) {
+	settings, err := s.store.GetTelegramSettings(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "telegram settings failed")
+		return
+	}
+	settings.BotToken = ""
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) saveTelegramSettings(w http.ResponseWriter, r *http.Request) {
+	var req models.TelegramSettings
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.BotToken == "" {
+		current, err := s.store.GetTelegramSettings(r.Context())
+		if err == nil {
+			req.BotToken = current.BotToken
+		}
+	}
+	settings, err := s.store.SaveTelegramSettings(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "telegram save failed")
+		return
+	}
+	settings.BotToken = ""
+	writeJSON(w, http.StatusOK, settings)
+}
+
+func (s *Server) testTelegramSettings(w http.ResponseWriter, r *http.Request) {
+	var req models.TelegramSettings
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if err := s.store.TestTelegramSettings(r.Context(), req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sent"})
+}
+
+func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.store.ListUsers(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "users failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+}
+
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
+	var req models.UserCreateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	user, err := s.store.CreateUser(r.Context(), req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, user)
+}
+
+func (s *Server) updateUser(w http.ResponseWriter, r *http.Request) {
+	var req models.UserUpdateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	user, err := s.store.UpdateUser(r.Context(), chi.URLParam(r, "id"), req)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, user)
+}
+
+func (s *Server) updateUserPassword(w http.ResponseWriter, r *http.Request) {
+	var req models.UserPasswordRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	err := s.store.UpdateUserPassword(r.Context(), chi.URLParam(r, "id"), req.Password)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
 func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
