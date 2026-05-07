@@ -3,6 +3,7 @@
   let currentHistory = null;
   let preferredRange = sessionStorage.getItem('rm_history_range') || '';
 
+  const API_BASE = `${window.location.protocol}//${window.location.hostname}:8080`;
   const originalFetch = window.fetch.bind(window);
   const style = document.createElement('style');
   style.textContent = `
@@ -28,12 +29,10 @@
     }
   `;
   document.head.appendChild(style);
-
   window.fetch = async (input, init) => {
     let url = typeof input === 'string' ? input : input?.url || '';
-    const requestedRange = preferredRange && /\/api\/agents\/[^/]+\/history\?range=/.test(url) ? preferredRange : '';
-    if (requestedRange) {
-      url = url.replace(/range=[^&]+/, `range=${encodeURIComponent(requestedRange)}`);
+    if (preferredRange && /\/api\/agents\/[^/]+\/history\?range=/.test(url)) {
+      url = url.replace(/range=[^&]+/, `range=${encodeURIComponent(preferredRange)}`);
       input = typeof input === 'string' ? url : new Request(url, input);
     }
     const response = await originalFetch(input, init);
@@ -50,17 +49,26 @@
     return localStorage.getItem('rm_token') || '';
   }
 
-  async function api(path, options = {}) {
-    const res = await originalFetch(path, {
+  function apiURL(path) {
+    if (/^https?:\/\//i.test(path)) return path;
+    return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
+  }
+
+  function api(path, options = {}) {
+    return originalFetch(apiURL(path), {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token()}`,
         ...(options.headers || {}),
       },
+    }).then(async (res) => {
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.error || `request failed ${res.status}`);
+      }
+      return payload;
     });
-    if (!res.ok) throw new Error(`api ${res.status}`);
-    return res.json();
   }
 
   function selectedPlatform() {
@@ -117,44 +125,42 @@
 
   function injectNetworkValidation() {
     const networkTabSelected = [...document.querySelectorAll('.tab-row button.selected')].some((button) => button.textContent.trim() === 'Red');
-    if (!networkTabSelected || document.querySelector('[data-v34-network-reconcile]')) return;
+    if (!networkTabSelected) return;
+    applyHiddenNetworkRows();
+    if (document.querySelector('[data-v34-network-reconcile]')) return;
     const table = document.querySelector('.table-wrap');
-    if (!table) return;
+    if (!table || !currentAgentId) return;
     const bar = document.createElement('div');
     bar.className = 'network-clean-toolbar';
     bar.innerHTML = '<span>Interfaces activas del ultimo reporte</span><button data-v34-network-reconcile>Validar interfaces</button>';
     table.parentElement.insertBefore(bar, table);
     bar.querySelector('button').addEventListener('click', async (event) => {
-      event.currentTarget.disabled = true;
-      event.currentTarget.textContent = 'Validando...';
+      const button = event.currentTarget;
+      if (!button) return;
+      button.disabled = true;
+      button.textContent = 'Validando...';
       try {
-        if (!currentAgentId) throw new Error('missing agent');
         await api(`/api/agents/${currentAgentId}/networks/reconcile`, { method: 'POST', body: '{}' });
         const next = await api(`/api/agents/${currentAgentId}/networks`);
         rewriteNetworkTable(next.networks || []);
-      } catch (_) {
+        rememberVisibleNetworks(next.networks || []);
+      } catch (error) {
+        console.warn('network reconcile failed, applying local cleanup', error);
         cleanLocalNetworkRows();
       } finally {
-        event.currentTarget.textContent = 'Validar interfaces';
-        event.currentTarget.disabled = false;
+        if (button.isConnected) {
+          button.textContent = 'Validar interfaces';
+          button.disabled = false;
+        }
       }
     });
-  }
-
-  function cleanLocalNetworkRows() {
-    const rows = [...document.querySelectorAll('.table-wrap tbody tr')];
-    rows.forEach((row) => {
-      const name = row.children[0]?.textContent?.trim() || '';
-      if (/^(br-|veth|virbr|docker|lo$)/i.test(name)) row.remove();
-    });
-    const tbody = document.querySelector('.table-wrap tbody');
-    if (tbody && !tbody.children.length) tbody.innerHTML = '<tr><td class="empty" colspan="4">Sin interfaces activas visibles</td></tr>';
   }
 
   function rewriteNetworkTable(networks) {
     const tbody = document.querySelector('.table-wrap tbody');
     if (!tbody) return;
-    tbody.innerHTML = networks.length ? networks.map((net) => `
+    const visible = filterVisibleNetworks(networks);
+    tbody.innerHTML = visible.length ? visible.map((net) => `
       <tr>
         <td>${escapeHTML(net.name || '')}</td>
         <td>${net.up ? 'up' : 'down'}</td>
@@ -162,6 +168,72 @@
         <td>${formatBytes(net.bytes_sent)}</td>
       </tr>
     `).join('') : '<tr><td class="empty" colspan="4">Sin muestras de red</td></tr>';
+  }
+
+  function hiddenNetworkKey() {
+    return currentAgentId ? `rm_hidden_networks_${currentAgentId}` : '';
+  }
+
+  function hiddenNetworks() {
+    const key = hiddenNetworkKey();
+    if (!key) return new Set();
+    try {
+      return new Set(JSON.parse(localStorage.getItem(key) || '[]'));
+    } catch (_) {
+      return new Set();
+    }
+  }
+
+  function saveHiddenNetworks(values) {
+    const key = hiddenNetworkKey();
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify([...values].sort()));
+  }
+
+  function shouldHideNetworkName(name) {
+    return /^(br-|veth|virbr|docker|lo$)/i.test(String(name || ''));
+  }
+
+  function filterVisibleNetworks(networks) {
+    const hidden = hiddenNetworks();
+    return (networks || []).filter((net) => {
+      const name = net.name || '';
+      return name && !hidden.has(name) && !shouldHideNetworkName(name);
+    });
+  }
+
+  function rememberVisibleNetworks(networks) {
+    const hidden = hiddenNetworks();
+    networks.forEach((net) => {
+      if (shouldHideNetworkName(net.name)) hidden.add(net.name);
+    });
+    saveHiddenNetworks(hidden);
+  }
+
+  function networkRows() {
+    const tbody = document.querySelector('.table-wrap tbody');
+    return tbody ? [...tbody.querySelectorAll('tr')] : [];
+  }
+
+  function cleanLocalNetworkRows() {
+    const hidden = hiddenNetworks();
+    networkRows().forEach((row) => {
+      const name = row.cells?.[0]?.textContent?.trim() || '';
+      if (name && shouldHideNetworkName(name)) {
+        hidden.add(name);
+        row.remove();
+      }
+    });
+    saveHiddenNetworks(hidden);
+  }
+
+  function applyHiddenNetworkRows() {
+    const hidden = hiddenNetworks();
+    if (!hidden.size) return;
+    networkRows().forEach((row) => {
+      const name = row.cells?.[0]?.textContent?.trim() || '';
+      if (hidden.has(name)) row.remove();
+    });
   }
 
   function clickRefresh() {
