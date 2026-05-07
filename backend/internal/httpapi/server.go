@@ -120,7 +120,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
-	detail, err := s.store.AgentDetailV3(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
+	detail, err := s.store.AgentDetailV31(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -204,7 +204,7 @@ func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 	activeOnly := strings.ToLower(r.URL.Query().Get("active")) != "false"
-	alerts, err := s.store.ListAlerts(r.Context(), activeOnly)
+	alerts, err := s.store.ListAlertsV31(r.Context(), activeOnly)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "alerts failed")
 		return
@@ -355,11 +355,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentID, _ := r.Context().Value(agentIDKey{}).(string)
-	if err := s.store.InsertMetrics(r.Context(), agentID, req); err != nil {
+	if err := s.store.InsertMetricsV31(r.Context(), agentID, req); err != nil {
 		writeError(w, http.StatusInternalServerError, "metrics failed")
 		return
 	}
-	_ = s.store.NotifyDueAlerts(r.Context())
+	_ = s.store.NotifyDueAlertsV31(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
 }
 
