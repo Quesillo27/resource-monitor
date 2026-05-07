@@ -45,10 +45,15 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents/{id}", s.agentDetail)
 			r.Get("/agents/{id}/history", s.agentHistory)
 			r.Get("/agents/{id}/status", s.agentStatus)
+			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
+			r.Put("/agents/{id}/alert-rules", s.saveAgentAlertRules)
+			r.Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
 			r.Patch("/agents/{id}", s.updateAgent)
 			r.Delete("/agents/{id}", s.deleteAgent)
 			r.Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/alerts", s.listAlerts)
+			r.Get("/alert-rules/defaults", s.defaultAlertRules)
+			r.Put("/alert-rules/defaults", s.saveDefaultAlertRules)
 			r.Get("/alert-settings/smtp", s.getSMTPSettings)
 			r.Put("/alert-settings/smtp", s.saveSMTPSettings)
 			r.Post("/alert-settings/smtp/test", s.testSMTPSettings)
@@ -205,6 +210,71 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
+}
+
+func (s *Server) defaultAlertRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.store.ListDefaultAlertRules(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "alert rules failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+}
+
+func (s *Server) saveDefaultAlertRules(w http.ResponseWriter, r *http.Request) {
+	var req models.AlertRulesRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	rules, err := s.store.SaveDefaultAlertRules(r.Context(), req.Rules)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+}
+
+func (s *Server) agentAlertRules(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.store.ListAgentAlertRules(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent rules failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+}
+
+func (s *Server) saveAgentAlertRules(w http.ResponseWriter, r *http.Request) {
+	var req models.AlertRulesRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	rules, err := s.store.SaveAgentAlertRules(r.Context(), chi.URLParam(r, "id"), req.Rules)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+}
+
+func (s *Server) resetAgentAlertRules(w http.ResponseWriter, r *http.Request) {
+	err := s.store.ResetAgentAlertRules(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "reset rules failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "reset"})
 }
 
 func (s *Server) getSMTPSettings(w http.ResponseWriter, r *http.Request) {
