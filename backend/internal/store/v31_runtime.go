@@ -13,7 +13,7 @@ import (
 )
 
 func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models.MetricsRequest) error {
-	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
 		return err
 	}
 	tx, err := s.pool.Begin(ctx)
@@ -101,7 +101,7 @@ func (s *Store) AgentDetailV31(ctx context.Context, id string, offlineAfterSecon
 }
 
 func (s *Store) ListAlertsV31(ctx context.Context, activeOnly bool) ([]models.Alert, error) {
-	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, alertSelectV31()+" WHERE ($1 = false OR al.active = true) ORDER BY al.active DESC, al.opened_at DESC", activeOnly)
@@ -113,7 +113,7 @@ func (s *Store) ListAlertsV31(ctx context.Context, activeOnly bool) ([]models.Al
 }
 
 func (s *Store) AgentAlertsV31(ctx context.Context, agentID string) ([]models.Alert, error) {
-	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, alertSelectV31()+" WHERE al.agent_id = $1 AND al.active = true ORDER BY al.severity = 'critical' DESC, al.opened_at DESC", agentID)
@@ -152,6 +152,9 @@ func scanAlertsV31(rows pgx.Rows) ([]models.Alert, error) {
 }
 
 func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
+	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
+		return err
+	}
 	cfg, err := s.GetSMTPSettings(ctx)
 	if err != nil || !cfg.Enabled || cfg.Host == "" || cfg.FromAddress == "" || cfg.ToAddresses == "" {
 		return err
@@ -210,4 +213,11 @@ func (s *Store) SafeAgentNameV31(ctx context.Context, id string) (string, error)
 		return "", ErrNotFound
 	}
 	return name, err
+}
+
+func (s *Store) ensureAlertRuntimeSchemas(ctx context.Context) error {
+	if err := s.EnsureV3Schema(ctx); err != nil {
+		return err
+	}
+	return s.ensureAlertRulesSchema(ctx)
 }
