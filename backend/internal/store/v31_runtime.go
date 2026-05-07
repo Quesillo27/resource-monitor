@@ -193,7 +193,7 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 	}
 	for _, alert := range pending {
 		body := fmt.Sprintf("Equipo: %s\nSeveridad: %s\nAlerta: %s\nApertura: %s\n", alert.agent, alert.severity, alert.message, alert.openedAt.Format(time.RFC3339))
-		if err := sendSMTP(cfg, "Resource Monitor alerta "+strings.ToUpper(alert.severity), body); err != nil {
+		if err := sendMailV3(cfg, "Resource Monitor alerta "+strings.ToUpper(alert.severity), body); err != nil {
 			return err
 		}
 		if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.id); err != nil {
