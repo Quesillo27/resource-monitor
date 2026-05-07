@@ -44,6 +44,8 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents", s.listAgents)
 			r.Get("/agents/{id}", s.agentDetail)
 			r.Get("/agents/{id}/history", s.agentHistory)
+			r.Get("/agents/{id}/networks", s.agentNetworks)
+			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/networks/reconcile", s.reconcileAgentNetworks)
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
 			r.Get("/alerts", s.listAlerts)
@@ -165,6 +167,33 @@ func (s *Server) agentHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, history)
+}
+
+func (s *Server) agentNetworks(w http.ResponseWriter, r *http.Request) {
+	includeInactive := strings.EqualFold(r.URL.Query().Get("include_inactive"), "true")
+	networks, err := s.store.AgentNetworks(r.Context(), chi.URLParam(r, "id"), includeInactive)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "agent networks failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"networks": networks})
+}
+
+func (s *Server) reconcileAgentNetworks(w http.ResponseWriter, r *http.Request) {
+	result, err := s.store.ReconcileAgentNetworks(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "network reconcile failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
