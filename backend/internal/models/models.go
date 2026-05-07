@@ -31,6 +31,26 @@ type AgentUpdateRequest struct {
 	Name string `json:"name"`
 }
 
+type AlertRule struct {
+	ID              string   `json:"id,omitempty"`
+	AgentID         *string  `json:"agent_id,omitempty"`
+	Metric          string   `json:"metric"`
+	ResourceKey     string   `json:"resource_key"`
+	Severity        string   `json:"severity"`
+	Enabled         bool     `json:"enabled"`
+	Threshold       float64  `json:"threshold"`
+	DurationSamples int      `json:"duration_samples"`
+	NotifyEmail     bool     `json:"notify_email"`
+	CooldownMinutes int      `json:"cooldown_minutes"`
+	Description     string   `json:"description"`
+	Source          string   `json:"source,omitempty"`
+	CurrentValue    *float64 `json:"current_value,omitempty"`
+}
+
+type AlertRulesRequest struct {
+	Rules []AlertRule `json:"rules"`
+}
+
 type SMTPSettings struct {
 	Enabled         bool   `json:"enabled"`
 	Host            string `json:"host"`
@@ -127,13 +147,21 @@ type Agent struct {
 }
 
 type Alert struct {
-	ID         string     `json:"id"`
-	AgentID    string     `json:"agent_id"`
-	AgentName  string     `json:"agent_name"`
-	Type       string     `json:"type"`
-	Severity   string     `json:"severity"`
-	Message    string     `json:"message"`
-	Active     bool       `json:"active"`
-	OpenedAt   time.Time  `json:"opened_at"`
-	ResolvedAt *time.Time `json:"resolved_at"`
+	ID                string     `json:"id"`
+	AgentID           string     `json:"agent_id"`
+	AgentName         string     `json:"agent_name"`
+	Type              string     `json:"type"`
+	Severity          string     `json:"severity"`
+	Message           string     `json:"message"`
+	ResourceKey       string     `json:"resource_key"`
+	RuleID            *string    `json:"rule_id,omitempty"`
+	ObservedValue     *float64   `json:"observed_value,omitempty"`
+	ThresholdValue    *float64   `json:"threshold_value,omitempty"`
+	Unit              string     `json:"unit,omitempty"`
+	DurationSamples   int        `json:"duration_samples,omitempty"`
+	NotifyEmail       bool       `json:"notify_email"`
+	NotificationCount int        `json:"notification_count"`
+	Active            bool       `json:"active"`
+	OpenedAt          time.Time  `json:"opened_at"`
+	ResolvedAt        *time.Time `json:"resolved_at"`
 }
