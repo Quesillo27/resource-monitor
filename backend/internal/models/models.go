@@ -202,4 +202,7 @@ type Alert struct {
 	Active                    bool         `json:"active"`
 	OpenedAt                  time.Time    `json:"opened_at"`
 	ResolvedAt                *time.Time   `json:"resolved_at"`
+	SeenAt                    *time.Time   `json:"seen_at"`
+	SeenByUserID              *string      `json:"seen_by_user_id,omitempty"`
+	SeenByUsername            *string      `json:"seen_by_username,omitempty"`
 }
