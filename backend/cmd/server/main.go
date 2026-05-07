@@ -32,6 +32,7 @@ func main() {
 
 	api := httpapi.NewServer(cfg, db)
 	go runRetention(ctx, db, cfg.RetentionDays)
+	go runOfflineAlerts(ctx, db, cfg.OfflineAfterSeconds)
 
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
@@ -59,6 +60,22 @@ func runRetention(ctx context.Context, db *store.Store, days int) {
 	for {
 		if err := db.DeleteOldMetrics(ctx, days); err != nil {
 			log.Printf("retention cleanup: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runOfflineAlerts(ctx context.Context, db *store.Store, offlineAfterSeconds int) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+
+	for {
+		if err := db.EvaluateOfflineAlerts(ctx, offlineAfterSeconds); err != nil {
+			log.Printf("offline alert evaluation: %v", err)
 		}
 		select {
 		case <-ctx.Done():
