@@ -54,7 +54,7 @@ func (s *Store) evaluateRuleAlerts(ctx context.Context, tx pgx.Tx, agentID strin
 func (s *Store) effectiveAlertRules(ctx context.Context, tx pgx.Tx, agentID string) ([]models.AlertRule, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,
-		       duration_samples, notify_email, cooldown_minutes, description
+		       duration_samples, notify_email, notify_telegram, cooldown_minutes, description
 		FROM alert_rules
 		WHERE agent_id IS NULL OR agent_id = $1
 		ORDER BY agent_id NULLS FIRST, metric, resource_key, severity
@@ -67,7 +67,7 @@ func (s *Store) effectiveAlertRules(ctx context.Context, tx pgx.Tx, agentID stri
 	for rows.Next() {
 		var rule models.AlertRule
 		var scannedAgentID string
-		if err := rows.Scan(&rule.ID, &scannedAgentID, &rule.Metric, &rule.ResourceKey, &rule.Severity, &rule.Enabled, &rule.Threshold, &rule.DurationSamples, &rule.NotifyEmail, &rule.CooldownMinutes, &rule.Description); err != nil {
+		if err := rows.Scan(&rule.ID, &scannedAgentID, &rule.Metric, &rule.ResourceKey, &rule.Severity, &rule.Enabled, &rule.Threshold, &rule.DurationSamples, &rule.NotifyEmail, &rule.NotifyTelegram, &rule.CooldownMinutes, &rule.Description); err != nil {
 			return nil, err
 		}
 		if scannedAgentID != "" {
@@ -233,8 +233,8 @@ func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models
 	var alertID string
 	err := tx.QueryRow(ctx, `
 		INSERT INTO alerts
-			(agent_id, type, resource_key, severity, message, rule_id, observed_value, threshold_value, unit, duration_samples, notify_email, cooldown_minutes)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			(agent_id, type, resource_key, severity, message, rule_id, observed_value, threshold_value, unit, duration_samples, notify_email, notify_telegram, cooldown_minutes)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		ON CONFLICT (agent_id, type, resource_key) WHERE active = true
 		DO UPDATE SET severity = EXCLUDED.severity,
 		              message = EXCLUDED.message,
@@ -244,10 +244,11 @@ func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models
 		              unit = EXCLUDED.unit,
 		              duration_samples = EXCLUDED.duration_samples,
 		              notify_email = EXCLUDED.notify_email,
+		              notify_telegram = EXCLUDED.notify_telegram,
 		              cooldown_minutes = EXCLUDED.cooldown_minutes,
 		              last_seen_at = now()
 		RETURNING id::text
-	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.CooldownMinutes).Scan(&alertID)
+	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.NotifyTelegram, rule.CooldownMinutes).Scan(&alertID)
 	if err != nil {
 		return err
 	}
