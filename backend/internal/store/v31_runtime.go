@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -136,7 +135,7 @@ func alertSelectV31() string {
 	return `
 		SELECT al.id::text, al.agent_id::text, a.name, al.type, al.severity, al.message,
 		       al.resource_key, COALESCE(al.rule_id::text, ''), al.observed_value, al.threshold_value, al.unit,
-		       al.duration_samples, al.notify_email, al.notification_count,
+		       al.duration_samples, al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
 		       al.active, al.opened_at, al.resolved_at
 		FROM alerts al
 		JOIN agents a ON a.id = al.agent_id
@@ -148,7 +147,7 @@ func scanAlertsV31(rows pgx.Rows) ([]models.Alert, error) {
 	for rows.Next() {
 		var alert models.Alert
 		var ruleID string
-		if err := rows.Scan(&alert.ID, &alert.AgentID, &alert.AgentName, &alert.Type, &alert.Severity, &alert.Message, &alert.ResourceKey, &ruleID, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotificationCount, &alert.Active, &alert.OpenedAt, &alert.ResolvedAt); err != nil {
+		if err := rows.Scan(&alert.ID, &alert.AgentID, &alert.AgentName, &alert.Type, &alert.Severity, &alert.Message, &alert.ResourceKey, &ruleID, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotifyTelegram, &alert.NotificationCount, &alert.TelegramNotificationCount, &alert.Active, &alert.OpenedAt, &alert.ResolvedAt); err != nil {
 			return nil, err
 		}
 		if ruleID != "" {
@@ -163,47 +162,47 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
 		return err
 	}
-	cfg, err := s.GetSMTPSettings(ctx)
-	if err != nil {
-		return err
+	smtpCfg, smtpErr := s.GetSMTPSettings(ctx)
+	telegramCfg, telegramErr := s.GetTelegramSettings(ctx)
+	if smtpErr != nil {
+		return smtpErr
 	}
-	if !cfg.Enabled || strings.TrimSpace(cfg.Host) == "" || strings.TrimSpace(cfg.ToAddresses) == "" {
-		return nil
+	if telegramErr != nil {
+		return telegramErr
 	}
-	if strings.TrimSpace(cfg.FromAddress) == "" {
-		cfg.FromAddress = strings.TrimSpace(cfg.Username)
+	if strings.TrimSpace(smtpCfg.FromAddress) == "" {
+		smtpCfg.FromAddress = strings.TrimSpace(smtpCfg.Username)
 	}
-	if strings.TrimSpace(cfg.FromAddress) == "" {
-		return nil
+	if smtpCfg.CooldownMinutes <= 0 {
+		smtpCfg.CooldownMinutes = 30
 	}
-	if cfg.CooldownMinutes <= 0 {
-		cfg.CooldownMinutes = 30
+	if telegramCfg.CooldownMinutes <= 0 {
+		telegramCfg.CooldownMinutes = 30
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT al.id::text, a.name, al.severity, al.message, al.opened_at
+		SELECT al.id::text, a.name, al.severity, al.message, al.resource_key,
+		       al.observed_value, al.threshold_value, al.unit, al.duration_samples,
+		       al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
+		       al.cooldown_minutes, al.opened_at
 		FROM alerts al
 		JOIN agents a ON a.id = al.agent_id
 		WHERE al.active = true
-		  AND al.notify_email = true
-		  AND (al.last_notified_at IS NULL OR al.last_notified_at < now() - (COALESCE(NULLIF(al.cooldown_minutes, 0), $1)::int * interval '1 minute'))
+		  AND (
+		    (al.notify_email = true AND (al.last_notified_at IS NULL OR al.last_notified_at < now() - (COALESCE(NULLIF(al.cooldown_minutes, 0), $1)::int * interval '1 minute')))
+		    OR
+		    (al.notify_telegram = true AND (al.telegram_notified_at IS NULL OR al.telegram_notified_at < now() - (COALESCE(NULLIF(al.cooldown_minutes, 0), $2)::int * interval '1 minute')))
+		  )
 		ORDER BY al.severity = 'critical' DESC, al.opened_at DESC
 		LIMIT 10
-	`, cfg.CooldownMinutes)
+	`, smtpCfg.CooldownMinutes, telegramCfg.CooldownMinutes)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	type pendingAlert struct {
-		id       string
-		agent    string
-		severity string
-		message  string
-		openedAt time.Time
-	}
-	pending := []pendingAlert{}
+	pending := []pendingAlertV32{}
 	for rows.Next() {
-		var alert pendingAlert
-		if err := rows.Scan(&alert.id, &alert.agent, &alert.severity, &alert.message, &alert.openedAt); err != nil {
+		var alert pendingAlertV32
+		if err := rows.Scan(&alert.ID, &alert.Agent, &alert.Severity, &alert.Message, &alert.ResourceKey, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotifyTelegram, &alert.NotificationCount, &alert.TelegramNotificationCount, &alert.CooldownMinutes, &alert.OpenedAt); err != nil {
 			return err
 		}
 		pending = append(pending, alert)
@@ -212,16 +211,25 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		return rows.Err()
 	}
 	for _, alert := range pending {
-		processes, err := s.alertProcessSnapshot(ctx, alert.id)
+		processes, err := s.alertProcessSnapshot(ctx, alert.ID)
 		if err != nil {
 			return err
 		}
-		body := fmt.Sprintf("Equipo: %s\nSeveridad: %s\nAlerta: %s\nApertura: %s\n%s", alert.agent, alert.severity, alert.message, alert.openedAt.Format(time.RFC3339), processSnapshotText(processes))
-		if err := sendMailV3(cfg, "Resource Monitor alerta "+strings.ToUpper(alert.severity), body); err != nil {
-			return err
+		if alert.NotifyEmail && smtpCfg.Enabled && strings.TrimSpace(smtpCfg.Host) != "" && strings.TrimSpace(smtpCfg.ToAddresses) != "" && strings.TrimSpace(smtpCfg.FromAddress) != "" {
+			if err := sendAlertHTMLMailV32(smtpCfg, alert, processes); err != nil {
+				return err
+			}
+			if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+				return err
+			}
 		}
-		if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.id); err != nil {
-			return err
+		if alert.NotifyTelegram && telegramCfg.Enabled && strings.TrimSpace(telegramCfg.BotToken) != "" && strings.TrimSpace(telegramCfg.ChatIDs) != "" {
+			if err := sendTelegramV32(telegramCfg, telegramAlertTextV32(alert, processes)); err != nil {
+				return err
+			}
+			if _, err := s.pool.Exec(ctx, "UPDATE alerts SET telegram_notified_at = now(), telegram_notification_count = telegram_notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -243,5 +251,8 @@ func (s *Store) ensureAlertRuntimeSchemas(ctx context.Context) error {
 	if err := s.ensureAlertRulesSchema(ctx); err != nil {
 		return err
 	}
-	return s.ensureAlertContextSchema(ctx)
+	if err := s.ensureAlertContextSchema(ctx); err != nil {
+		return err
+	}
+	return s.EnsureV32Schema(ctx)
 }
