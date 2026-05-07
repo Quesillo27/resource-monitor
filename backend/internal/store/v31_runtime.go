@@ -156,8 +156,17 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		return err
 	}
 	cfg, err := s.GetSMTPSettings(ctx)
-	if err != nil || !cfg.Enabled || cfg.Host == "" || cfg.FromAddress == "" || cfg.ToAddresses == "" {
+	if err != nil {
 		return err
+	}
+	if !cfg.Enabled || strings.TrimSpace(cfg.Host) == "" || strings.TrimSpace(cfg.ToAddresses) == "" {
+		return nil
+	}
+	if strings.TrimSpace(cfg.FromAddress) == "" {
+		cfg.FromAddress = strings.TrimSpace(cfg.Username)
+	}
+	if strings.TrimSpace(cfg.FromAddress) == "" {
+		return nil
 	}
 	if cfg.CooldownMinutes <= 0 {
 		cfg.CooldownMinutes = 30
