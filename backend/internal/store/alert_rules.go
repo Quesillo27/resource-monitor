@@ -25,6 +25,7 @@ func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS duration_samples INTEGER NOT NULL DEFAULT 1",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT false",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN NOT NULL DEFAULT false",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS cooldown_minutes INTEGER NOT NULL DEFAULT 30",
 		`CREATE TABLE IF NOT EXISTS alert_rules (
 			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,11 +37,13 @@ func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 			threshold DOUBLE PRECISION NOT NULL DEFAULT 0,
 			duration_samples INTEGER NOT NULL DEFAULT 2,
 			notify_email BOOLEAN NOT NULL DEFAULT false,
+			notify_telegram BOOLEAN NOT NULL DEFAULT false,
 			cooldown_minutes INTEGER NOT NULL DEFAULT 30,
 			description TEXT NOT NULL DEFAULT '',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`,
+		"ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN NOT NULL DEFAULT false",
 		`CREATE UNIQUE INDEX IF NOT EXISTS alert_rules_scope_metric_idx
 			ON alert_rules ((COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)), metric, resource_key, severity)`,
 		`CREATE TABLE IF NOT EXISTS alert_rule_matches (
@@ -52,17 +55,17 @@ func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			PRIMARY KEY (agent_id, rule_id, resource_key)
 		)`,
-		`INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description) VALUES
-			('cpu', '', 'warning', true, 85, 2, false, 30, 'CPU sobre umbral warning'),
-			('cpu', '', 'critical', true, 95, 2, true, 30, 'CPU sobre umbral critical'),
-			('ram', '', 'warning', true, 85, 2, false, 30, 'RAM sobre umbral warning'),
-			('ram', '', 'critical', true, 95, 2, true, 30, 'RAM sobre umbral critical'),
-			('disk_used_percent', '', 'warning', true, 80, 2, false, 30, 'Disco sobre umbral warning'),
-			('disk_used_percent', '', 'critical', true, 90, 2, true, 30, 'Disco sobre umbral critical'),
-			('network_recv_mbps', '', 'warning', false, 0, 2, false, 30, 'Red recibida sobre umbral warning'),
-			('network_recv_mbps', '', 'critical', false, 0, 2, true, 30, 'Red recibida sobre umbral critical'),
-			('network_sent_mbps', '', 'warning', false, 0, 2, false, 30, 'Red enviada sobre umbral warning'),
-			('network_sent_mbps', '', 'critical', false, 0, 2, true, 30, 'Red enviada sobre umbral critical')
+		`INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, notify_telegram, cooldown_minutes, description) VALUES
+			('cpu', '', 'warning', true, 85, 2, false, false, 30, 'CPU sobre umbral warning'),
+			('cpu', '', 'critical', true, 95, 2, true, false, 30, 'CPU sobre umbral critical'),
+			('ram', '', 'warning', true, 85, 2, false, false, 30, 'RAM sobre umbral warning'),
+			('ram', '', 'critical', true, 95, 2, true, false, 30, 'RAM sobre umbral critical'),
+			('disk_used_percent', '', 'warning', true, 80, 2, false, false, 30, 'Disco sobre umbral warning'),
+			('disk_used_percent', '', 'critical', true, 90, 2, true, false, 30, 'Disco sobre umbral critical'),
+			('network_recv_mbps', '', 'warning', false, 0, 2, false, false, 30, 'Red recibida sobre umbral warning'),
+			('network_recv_mbps', '', 'critical', false, 0, 2, true, false, 30, 'Red recibida sobre umbral critical'),
+			('network_sent_mbps', '', 'warning', false, 0, 2, false, false, 30, 'Red enviada sobre umbral warning'),
+			('network_sent_mbps', '', 'critical', false, 0, 2, true, false, 30, 'Red enviada sobre umbral critical')
 		 ON CONFLICT DO NOTHING`,
 	}
 	for _, statement := range statements {
@@ -175,7 +178,7 @@ func (s *Store) ResetAgentAlertRules(ctx context.Context, agentID string) error 
 func (s *Store) listAlertRules(ctx context.Context, agentID string) ([]models.AlertRule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,
-		       duration_samples, notify_email, cooldown_minutes, description
+		       duration_samples, notify_email, notify_telegram, cooldown_minutes, description
 		FROM alert_rules
 		WHERE (($1 = '' AND agent_id IS NULL) OR ($1 <> '' AND agent_id = $1::uuid))
 		ORDER BY metric, resource_key, severity
@@ -188,7 +191,7 @@ func (s *Store) listAlertRules(ctx context.Context, agentID string) ([]models.Al
 	for rows.Next() {
 		var rule models.AlertRule
 		var scannedAgentID string
-		if err := rows.Scan(&rule.ID, &scannedAgentID, &rule.Metric, &rule.ResourceKey, &rule.Severity, &rule.Enabled, &rule.Threshold, &rule.DurationSamples, &rule.NotifyEmail, &rule.CooldownMinutes, &rule.Description); err != nil {
+		if err := rows.Scan(&rule.ID, &scannedAgentID, &rule.Metric, &rule.ResourceKey, &rule.Severity, &rule.Enabled, &rule.Threshold, &rule.DurationSamples, &rule.NotifyEmail, &rule.NotifyTelegram, &rule.CooldownMinutes, &rule.Description); err != nil {
 			return nil, err
 		}
 		if scannedAgentID != "" {
@@ -219,14 +222,14 @@ func (s *Store) replaceAlertRules(ctx context.Context, agentID string, rules []m
 		}
 		if agentID == "" {
 			_, err = tx.Exec(ctx, `
-				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description)
-				VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9)
-			`, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.CooldownMinutes, rule.Description)
+				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, notify_telegram, cooldown_minutes, description)
+				VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			`, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.NotifyTelegram, rule.CooldownMinutes, rule.Description)
 		} else {
 			_, err = tx.Exec(ctx, `
-				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			`, agentID, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.CooldownMinutes, rule.Description)
+				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, notify_telegram, cooldown_minutes, description)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			`, agentID, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.NotifyTelegram, rule.CooldownMinutes, rule.Description)
 		}
 		if err != nil {
 			return err
