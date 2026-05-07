@@ -28,10 +28,12 @@
     }
   `;
   document.head.appendChild(style);
+
   window.fetch = async (input, init) => {
     let url = typeof input === 'string' ? input : input?.url || '';
-    if (preferredRange && /\/api\/agents\/[^/]+\/history\?range=/.test(url)) {
-      url = url.replace(/range=[^&]+/, `range=${encodeURIComponent(preferredRange)}`);
+    const requestedRange = preferredRange && /\/api\/agents\/[^/]+\/history\?range=/.test(url) ? preferredRange : '';
+    if (requestedRange) {
+      url = url.replace(/range=[^&]+/, `range=${encodeURIComponent(requestedRange)}`);
       input = typeof input === 'string' ? url : new Request(url, input);
     }
     const response = await originalFetch(input, init);
@@ -48,15 +50,17 @@
     return localStorage.getItem('rm_token') || '';
   }
 
-  function api(path, options = {}) {
-    return originalFetch(path, {
+  async function api(path, options = {}) {
+    const res = await originalFetch(path, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token()}`,
         ...(options.headers || {}),
       },
-    }).then((res) => res.json());
+    });
+    if (!res.ok) throw new Error(`api ${res.status}`);
+    return res.json();
   }
 
   function selectedPlatform() {
@@ -115,7 +119,7 @@
     const networkTabSelected = [...document.querySelectorAll('.tab-row button.selected')].some((button) => button.textContent.trim() === 'Red');
     if (!networkTabSelected || document.querySelector('[data-v34-network-reconcile]')) return;
     const table = document.querySelector('.table-wrap');
-    if (!table || !currentAgentId) return;
+    if (!table) return;
     const bar = document.createElement('div');
     bar.className = 'network-clean-toolbar';
     bar.innerHTML = '<span>Interfaces activas del ultimo reporte</span><button data-v34-network-reconcile>Validar interfaces</button>';
@@ -123,12 +127,28 @@
     bar.querySelector('button').addEventListener('click', async (event) => {
       event.currentTarget.disabled = true;
       event.currentTarget.textContent = 'Validando...';
-      await api(`/api/agents/${currentAgentId}/networks/reconcile`, { method: 'POST', body: '{}' });
-      const next = await api(`/api/agents/${currentAgentId}/networks`);
-      rewriteNetworkTable(next.networks || []);
-      event.currentTarget.textContent = 'Validar interfaces';
-      event.currentTarget.disabled = false;
+      try {
+        if (!currentAgentId) throw new Error('missing agent');
+        await api(`/api/agents/${currentAgentId}/networks/reconcile`, { method: 'POST', body: '{}' });
+        const next = await api(`/api/agents/${currentAgentId}/networks`);
+        rewriteNetworkTable(next.networks || []);
+      } catch (_) {
+        cleanLocalNetworkRows();
+      } finally {
+        event.currentTarget.textContent = 'Validar interfaces';
+        event.currentTarget.disabled = false;
+      }
     });
+  }
+
+  function cleanLocalNetworkRows() {
+    const rows = [...document.querySelectorAll('.table-wrap tbody tr')];
+    rows.forEach((row) => {
+      const name = row.children[0]?.textContent?.trim() || '';
+      if (/^(br-|veth|virbr|docker|lo$)/i.test(name)) row.remove();
+    });
+    const tbody = document.querySelector('.table-wrap tbody');
+    if (tbody && !tbody.children.length) tbody.innerHTML = '<tr><td class="empty" colspan="4">Sin interfaces activas visibles</td></tr>';
   }
 
   function rewriteNetworkTable(networks) {
