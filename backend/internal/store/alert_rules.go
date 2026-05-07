@@ -1,0 +1,339 @@
+package store
+
+import (
+	"context"
+	"math"
+	"sort"
+	"strings"
+
+	"resource-monitor/backend/internal/models"
+)
+
+const (
+	metricCPU         = "cpu"
+	metricRAM         = "ram"
+	metricDisk        = "disk_used_percent"
+	metricNetworkRecv = "network_recv_mbps"
+	metricNetworkSent = "network_sent_mbps"
+)
+
+func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
+	statements := []string{
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS rule_id UUID",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS observed_value DOUBLE PRECISION",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS threshold_value DOUBLE PRECISION",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS duration_samples INTEGER NOT NULL DEFAULT 1",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT false",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS cooldown_minutes INTEGER NOT NULL DEFAULT 30",
+		`CREATE TABLE IF NOT EXISTS alert_rules (
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id UUID REFERENCES agents(id) ON DELETE CASCADE,
+			metric TEXT NOT NULL,
+			resource_key TEXT NOT NULL DEFAULT '',
+			severity TEXT NOT NULL,
+			enabled BOOLEAN NOT NULL DEFAULT true,
+			threshold DOUBLE PRECISION NOT NULL DEFAULT 0,
+			duration_samples INTEGER NOT NULL DEFAULT 2,
+			notify_email BOOLEAN NOT NULL DEFAULT false,
+			cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+			description TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS alert_rules_scope_metric_idx
+			ON alert_rules ((COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)), metric, resource_key, severity)`,
+		`CREATE TABLE IF NOT EXISTS alert_rule_matches (
+			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+			resource_key TEXT NOT NULL DEFAULT '',
+			consecutive_count INTEGER NOT NULL DEFAULT 0,
+			last_value DOUBLE PRECISION NOT NULL DEFAULT 0,
+			last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			PRIMARY KEY (agent_id, rule_id, resource_key)
+		)`,
+		`INSERT INTO alert_rules (metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description) VALUES
+			('cpu', '', 'warning', true, 85, 2, false, 30, 'CPU sobre umbral warning'),
+			('cpu', '', 'critical', true, 95, 2, true, 30, 'CPU sobre umbral critical'),
+			('ram', '', 'warning', true, 85, 2, false, 30, 'RAM sobre umbral warning'),
+			('ram', '', 'critical', true, 95, 2, true, 30, 'RAM sobre umbral critical'),
+			('disk_used_percent', '', 'warning', true, 80, 2, false, 30, 'Disco sobre umbral warning'),
+			('disk_used_percent', '', 'critical', true, 90, 2, true, 30, 'Disco sobre umbral critical'),
+			('network_recv_mbps', '', 'warning', false, 0, 2, false, 30, 'Red recibida sobre umbral warning'),
+			('network_recv_mbps', '', 'critical', false, 0, 2, true, 30, 'Red recibida sobre umbral critical'),
+			('network_sent_mbps', '', 'warning', false, 0, 2, false, 30, 'Red enviada sobre umbral warning'),
+			('network_sent_mbps', '', 'critical', false, 0, 2, true, 30, 'Red enviada sobre umbral critical')
+		 ON CONFLICT DO NOTHING`,
+	}
+	for _, statement := range statements {
+		if _, err := s.pool.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListDefaultAlertRules(ctx context.Context) ([]models.AlertRule, error) {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return nil, err
+	}
+	return s.listAlertRules(ctx, "")
+}
+
+func (s *Store) SaveDefaultAlertRules(ctx context.Context, rules []models.AlertRule) ([]models.AlertRule, error) {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.replaceAlertRules(ctx, "", rules); err != nil {
+		return nil, err
+	}
+	return s.ListDefaultAlertRules(ctx)
+}
+
+func (s *Store) ListAgentAlertRules(ctx context.Context, agentID string) ([]models.AlertRule, error) {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return nil, err
+	}
+	defaults, err := s.listAlertRules(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	overrides, err := s.listAlertRules(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	merged := map[string]models.AlertRule{}
+	for _, rule := range defaults {
+		rule.Source = "global"
+		merged[ruleKey(rule)] = rule
+	}
+	for _, rule := range overrides {
+		rule.Source = "agent"
+		merged[ruleKey(rule)] = rule
+	}
+	current, _ := s.currentRuleValues(ctx, agentID)
+	for key, value := range current {
+		if rule, ok := merged[key]; ok {
+			v := value
+			rule.CurrentValue = &v
+			merged[key] = rule
+		}
+	}
+	out := make([]models.AlertRule, 0, len(merged))
+	for _, rule := range merged {
+		out = append(out, rule)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Metric != out[j].Metric {
+			return alertMetricOrder(out[i].Metric) < alertMetricOrder(out[j].Metric)
+		}
+		if out[i].ResourceKey != out[j].ResourceKey {
+			return out[i].ResourceKey < out[j].ResourceKey
+		}
+		return alertSeverityOrder(out[i].Severity) < alertSeverityOrder(out[j].Severity)
+	})
+	return out, nil
+}
+
+func (s *Store) SaveAgentAlertRules(ctx context.Context, agentID string, rules []models.AlertRule) ([]models.AlertRule, error) {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return nil, err
+	}
+	if err := s.replaceAlertRules(ctx, agentID, rules); err != nil {
+		return nil, err
+	}
+	return s.ListAgentAlertRules(ctx, agentID)
+}
+
+func (s *Store) ResetAgentAlertRules(ctx context.Context, agentID string) error {
+	if err := s.ensureAlertRulesSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "DELETE FROM alert_rule_matches WHERE agent_id = $1", agentID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "DELETE FROM alert_rules WHERE agent_id = $1", agentID); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) listAlertRules(ctx context.Context, agentID string) ([]models.AlertRule, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,
+		       duration_samples, notify_email, cooldown_minutes, description
+		FROM alert_rules
+		WHERE (($1 = '' AND agent_id IS NULL) OR ($1 <> '' AND agent_id = $1::uuid))
+		ORDER BY metric, resource_key, severity
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	rules := []models.AlertRule{}
+	for rows.Next() {
+		var rule models.AlertRule
+		var scannedAgentID string
+		if err := rows.Scan(&rule.ID, &scannedAgentID, &rule.Metric, &rule.ResourceKey, &rule.Severity, &rule.Enabled, &rule.Threshold, &rule.DurationSamples, &rule.NotifyEmail, &rule.CooldownMinutes, &rule.Description); err != nil {
+			return nil, err
+		}
+		if scannedAgentID != "" {
+			rule.AgentID = &scannedAgentID
+		}
+		rules = append(rules, normalizeAlertRule(rule))
+	}
+	return rules, rows.Err()
+}
+
+func (s *Store) replaceAlertRules(ctx context.Context, agentID string, rules []models.AlertRule) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if agentID == "" {
+		if _, err := tx.Exec(ctx, "DELETE FROM alert_rules WHERE agent_id IS NULL"); err != nil {
+			return err
+		}
+	} else if _, err := tx.Exec(ctx, "DELETE FROM alert_rules WHERE agent_id = $1", agentID); err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		rule = normalizeAlertRule(rule)
+		if !validAlertMetric(rule.Metric) || !validAlertSeverity(rule.Severity) {
+			continue
+		}
+		if agentID == "" {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description)
+				VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.CooldownMinutes, rule.Description)
+		} else {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO alert_rules (agent_id, metric, resource_key, severity, enabled, threshold, duration_samples, notify_email, cooldown_minutes, description)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			`, agentID, rule.Metric, rule.ResourceKey, rule.Severity, rule.Enabled, rule.Threshold, rule.DurationSamples, rule.NotifyEmail, rule.CooldownMinutes, rule.Description)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Store) ensureAgentExists(ctx context.Context, agentID string) error {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1)", agentID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) currentRuleValues(ctx context.Context, agentID string) (map[string]float64, error) {
+	values := map[string]float64{}
+	var cpu, ram float64
+	err := s.pool.QueryRow(ctx, `
+		SELECT cpu_percent, memory_used_percent
+		FROM metric_samples
+		WHERE agent_id = $1
+		ORDER BY captured_at DESC
+		LIMIT 1
+	`, agentID).Scan(&cpu, &ram)
+	if err == nil {
+		values[metricCPU+"::warning"] = cpu
+		values[metricCPU+"::critical"] = cpu
+		values[metricRAM+"::warning"] = ram
+		values[metricRAM+"::critical"] = ram
+	}
+	disks, err := s.latestDisks(ctx, agentID)
+	if err != nil {
+		return values, err
+	}
+	for _, disk := range disks {
+		key := diskResourceKey(disk)
+		values[metricDisk+":"+key+":warning"] = disk.UsedPercent
+		values[metricDisk+":"+key+":critical"] = disk.UsedPercent
+	}
+	return values, nil
+}
+
+func normalizeAlertRule(rule models.AlertRule) models.AlertRule {
+	rule.Metric = strings.TrimSpace(rule.Metric)
+	rule.ResourceKey = strings.TrimSpace(rule.ResourceKey)
+	rule.Severity = strings.TrimSpace(strings.ToLower(rule.Severity))
+	if rule.DurationSamples <= 0 {
+		rule.DurationSamples = 2
+	}
+	if rule.CooldownMinutes <= 0 {
+		rule.CooldownMinutes = 30
+	}
+	if math.IsNaN(rule.Threshold) || math.IsInf(rule.Threshold, 0) {
+		rule.Threshold = 0
+	}
+	return rule
+}
+
+func diskResourceKey(disk models.DiskMetric) string {
+	if strings.TrimSpace(disk.Mountpoint) != "" {
+		return strings.TrimSpace(disk.Mountpoint)
+	}
+	return strings.TrimSpace(disk.Name)
+}
+
+func ruleKey(rule models.AlertRule) string {
+	return rule.Metric + ":" + rule.ResourceKey + ":" + rule.Severity
+}
+
+func validAlertMetric(metric string) bool {
+	switch metric {
+	case metricCPU, metricRAM, metricDisk, metricNetworkRecv, metricNetworkSent:
+		return true
+	default:
+		return false
+	}
+}
+
+func validAlertSeverity(severity string) bool {
+	return severity == "warning" || severity == "critical"
+}
+
+func alertMetricOrder(metric string) int {
+	switch metric {
+	case metricCPU:
+		return 1
+	case metricRAM:
+		return 2
+	case metricNetworkRecv:
+		return 3
+	case metricNetworkSent:
+		return 4
+	case metricDisk:
+		return 5
+	default:
+		return 99
+	}
+}
+
+func alertSeverityOrder(severity string) int {
+	if severity == "critical" {
+		return 1
+	}
+	return 2
+}
