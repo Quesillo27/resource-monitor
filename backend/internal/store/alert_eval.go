@@ -44,7 +44,7 @@ func (s *Store) evaluateRuleAlerts(ctx context.Context, tx pgx.Tx, agentID strin
 		activeKeys[value.Metric+":"+value.ResourceKey] = true
 		status = maxStatus(status, severityStatus(rule.Severity))
 		message := fmt.Sprintf("%s %.2f%s supero umbral %.2f%s durante %d muestras", value.Label, value.Value, value.Unit, rule.Threshold, value.Unit, count)
-		if err := upsertRuleAlert(ctx, tx, agentID, *rule, value, count, message); err != nil {
+		if err := upsertRuleAlert(ctx, tx, agentID, *rule, value, count, message, req.Processes); err != nil {
 			return "", nil, err
 		}
 	}
@@ -229,8 +229,9 @@ func bumpRuleMatch(ctx context.Context, tx pgx.Tx, agentID string, rule models.A
 	return count, err
 }
 
-func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models.AlertRule, value alertValue, count int, message string) error {
-	_, err := tx.Exec(ctx, `
+func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models.AlertRule, value alertValue, count int, message string, processes []models.ProcMetric) error {
+	var alertID string
+	err := tx.QueryRow(ctx, `
 		INSERT INTO alerts
 			(agent_id, type, resource_key, severity, message, rule_id, observed_value, threshold_value, unit, duration_samples, notify_email, cooldown_minutes)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -245,8 +246,12 @@ func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models
 		              notify_email = EXCLUDED.notify_email,
 		              cooldown_minutes = EXCLUDED.cooldown_minutes,
 		              last_seen_at = now()
-	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.CooldownMinutes)
-	return err
+		RETURNING id::text
+	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.CooldownMinutes).Scan(&alertID)
+	if err != nil {
+		return err
+	}
+	return attachAlertProcessSnapshot(ctx, tx, alertID, processes)
 }
 
 func ruleSpecificity(rule models.AlertRule) int {
