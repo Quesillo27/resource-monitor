@@ -47,6 +47,8 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
 			r.Get("/alerts", s.listAlerts)
+			r.Post("/alerts/seen-all", s.markAllAlertsSeen)
+			r.Post("/alerts/{id}/seen", s.markAlertSeen)
 			r.Get("/alert-rules/defaults", s.defaultAlertRules)
 
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/alert-rules", s.saveAgentAlertRules)
@@ -120,7 +122,7 @@ func (s *Server) dashboardOverview(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "overview failed")
 		return
 	}
-	if alerts, err := s.store.ListAlertsV31(r.Context(), true); err == nil {
+	if alerts, err := s.store.ListAlertNotifications(r.Context(), "false", "all"); err == nil {
 		if len(alerts) > 8 {
 			alerts = alerts[:8]
 		}
@@ -140,7 +142,7 @@ func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
-	detail, err := s.store.AgentDetailV31(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
+	detail, err := s.store.AgentDetailNotifications(r.Context(), chi.URLParam(r, "id"), s.cfg.OfflineAfterSeconds)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -223,13 +225,44 @@ func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
-	activeOnly := strings.ToLower(r.URL.Query().Get("active")) != "false"
-	alerts, err := s.store.ListAlertsV31(r.Context(), activeOnly)
+	seen := strings.ToLower(r.URL.Query().Get("seen"))
+	if seen == "" {
+		seen = "false"
+	}
+	active := strings.ToLower(r.URL.Query().Get("active"))
+	if active == "" {
+		active = "all"
+	}
+	alerts, err := s.store.ListAlertNotifications(r.Context(), seen, active)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "alerts failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
+}
+
+func (s *Server) markAlertSeen(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(userIDKey{}).(string)
+	username, _ := r.Context().Value(usernameKey{}).(string)
+	if err := s.store.MarkAlertSeen(r.Context(), chi.URLParam(r, "id"), userID, username); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "alert not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "mark alert seen failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) markAllAlertsSeen(w http.ResponseWriter, r *http.Request) {
+	userID, _ := r.Context().Value(userIDKey{}).(string)
+	username, _ := r.Context().Value(usernameKey{}).(string)
+	count, err := s.store.MarkAllAlertsSeen(r.Context(), userID, username)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "mark all alerts seen failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "updated": count})
 }
 
 func (s *Server) defaultAlertRules(w http.ResponseWriter, r *http.Request) {
