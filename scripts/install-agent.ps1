@@ -69,6 +69,9 @@ if ($EnrollmentToken -ne "") { $installArgs += @("--enrollment-token", $Enrollme
 if ($Name -ne "") { $installArgs += @("--name", $Name) }
 if ($Services -ne "") { $installArgs += @("--services", $Services) }
 & $installPath @installArgs
+if ($LASTEXITCODE -ne 0) {
+  throw "Fallo al instalar el agente (exit code $LASTEXITCODE). Revisa los permisos de administrador."
+}
 
 Write-Host "Iniciando servicio..."
 Start-Service resource-monitor-agent -ErrorAction SilentlyContinue

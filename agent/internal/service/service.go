@@ -20,7 +20,8 @@ type program struct {
 }
 
 func Install(configPath string) error {
-	svc, err := service.New(&program{configPath: configPath}, serviceConfig(configPath))
+	cfg := serviceConfig(configPath)
+	svc, err := service.New(&program{configPath: configPath}, cfg)
 	if err != nil {
 		return err
 	}
@@ -28,8 +29,24 @@ func Install(configPath string) error {
 		_ = svc.Stop()
 		_ = svc.Uninstall()
 	}
-	if err := svc.Install(); err != nil {
-		return err
+	// Recreate svc to release Windows SCM handles before installing.
+	// On Windows, DeleteService marks for deletion until all handles close;
+	// a fresh svc object ensures Install() doesn't race the deletion.
+	var installErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		svc, err = service.New(&program{configPath: configPath}, cfg)
+		if err != nil {
+			return err
+		}
+		if installErr = svc.Install(); installErr == nil {
+			break
+		}
+	}
+	if installErr != nil {
+		return installErr
 	}
 	return svc.Start()
 }
