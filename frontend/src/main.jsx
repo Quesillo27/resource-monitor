@@ -329,14 +329,21 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
 function AgentDetail({ api, agentId, onBack }) {
   const [tab, setTab] = useState('summary');
   const [range, setRange] = useState('24h');
+
   const { data, loading, reload, lastUpdated } = useLoad(async () => {
-    const [detail, status, history] = await Promise.all([
+    const [detail, status] = await Promise.all([
       api.get(`/api/agents/${agentId}`),
       api.get(`/api/agents/${agentId}/status`),
-      api.get(`/api/agents/${agentId}/history?range=${range}`),
     ]);
-    return { ...detail, agent_status: status, range_history: history };
-  }, [agentId, range], REFRESH_MS);
+    return { ...detail, agent_status: status };
+  }, [agentId], REFRESH_MS);
+
+  const { data: historyData, loading: historyLoading } = useLoad(
+    () => api.get(`/api/agents/${agentId}/history?range=${range}`),
+    [agentId, range],
+    REFRESH_MS
+  );
+
   const { data: inventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
   const agent = data?.agent;
   const disks = sortBy(data?.disks || [], (disk) => disk.used_percent);
@@ -366,7 +373,7 @@ function AgentDetail({ api, agentId, onBack }) {
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
-          {tab === 'resources' && <ResourcesTab agent={agent} history={data.range_history} disks={disks} networks={networks} range={range} setRange={setRange} />}
+          {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} />}
           {tab === 'disks' && <DisksTable disks={disks} />}
           {tab === 'network' && <NetworkTable networks={networks} />}
           {tab === 'processes' && <ProcessesTable processes={processes} />}
@@ -404,14 +411,24 @@ function SummaryTab({ agent, status, disks, networks, services, alerts }) {
   );
 }
 
-function ResourcesTab({ agent, history, disks: currentDisks = [], networks: currentNetworks = [], range, setRange }) {
-  const metrics = history?.metrics || [];
-  const network = history?.network || history?.networks || [];
-  const diskHistory = history?.disks || [];
-  const diskNames = [...new Set(diskHistory.map((d) => d.mountpoint || d.name))].slice(0, 4);
-  const latestMetric = lastItem(metrics) || {};
-  const latestNetwork = lastItem(network) || {};
-  const latestDisks = latestDiskValues(diskHistory);
+function ResourcesTab({ agent, history, historyLoading = false, disks: currentDisks = [], networks: currentNetworks = [], range, setRange }) {
+  const rawMetrics = history?.metrics || [];
+  const rawNetwork = history?.network || history?.networks || [];
+  const rawDiskHistory = history?.disks || [];
+  const diskNames = [...new Set(rawDiskHistory.map((d) => d.mountpoint || d.name))].slice(0, 4);
+
+  const grid = generateTimeGrid(range);
+  const metrics = padHistoryToGrid(rawMetrics, grid, ['cpu_percent', 'memory_used_percent', 'swap_used_percent', 'gateway_latency_ms']);
+  const network = padHistoryToGrid(rawNetwork, grid, ['bytes_recv_per_sec', 'bytes_sent_per_sec']);
+  const diskHistory = padHistoryToGrid(rawDiskHistory, grid, diskNames, (bucket) => {
+    const row = { captured_at: bucket };
+    diskNames.forEach((name) => { row[name] = null; });
+    return row;
+  });
+
+  const latestMetric = lastItem(rawMetrics) || {};
+  const latestNetwork = lastItem(rawNetwork) || {};
+  const latestDisks = latestDiskValues(rawDiskHistory);
   const busiestDisk = [...(currentDisks.length ? currentDisks : latestDisks)].sort((a, b) => Number(b.used_percent || 0) - Number(a.used_percent || 0))[0];
   const totalDiskBytes = currentDisks.reduce((sum, disk) => sum + Number(disk.total_bytes || 0), 0);
   const usedDiskBytes = currentDisks.reduce((sum, disk) => sum + Number(disk.used_bytes || 0), 0);
@@ -445,34 +462,18 @@ function ResourcesTab({ agent, history, disks: currentDisks = [], networks: curr
           </div>
         </Panel>
       </div>
-      <div className="chart-grid">
-        <ChartPanel
-          title="CPU / RAM / Swap"
-          subtitle="Porcentaje de consumo por punto"
-          unit="%"
-        >
-          <LineChart points={metrics} series={[["CPU", "cpu_percent", "#2563eb"], ["RAM", "memory_used_percent", "#7c3aed"], ["Swap", "swap_used_percent", "#d97706"]]} max={100} />
+      <div className={`chart-grid${historyLoading ? ' chart-loading' : ''}`}>
+        <ChartPanel title="CPU / RAM / Swap" subtitle="Porcentaje de consumo por punto" unit="%">
+          <LineChart points={metrics} grid={grid} series={[["CPU", "cpu_percent", "#2563eb"], ["RAM", "memory_used_percent", "#7c3aed"], ["Swap", "swap_used_percent", "#d97706"]]} max={100} />
         </ChartPanel>
-        <ChartPanel
-          title="Red"
-          subtitle="Velocidad estimada recibida/enviada"
-          unit="B/s"
-        >
-          <LineChart points={network} series={[["Recibido", "bytes_recv_per_sec", "#fb5b7b"], ["Enviado", "bytes_sent_per_sec", "#38a3ff"]]} formatter={rate} />
+        <ChartPanel title="Red" subtitle="Velocidad estimada recibida/enviada" unit="B/s">
+          <LineChart points={network} grid={grid} series={[["Recibido", "bytes_recv_per_sec", "#fb5b7b"], ["Enviado", "bytes_sent_per_sec", "#38a3ff"]]} formatter={rate} />
         </ChartPanel>
-        <ChartPanel
-          title="Latencia al gateway"
-          subtitle="Latencia promedio al gateway por defecto"
-          unit="ms"
-        >
-          <LineChart points={metrics} series={[["Latencia GW", "gateway_latency_ms", "#f59e0b"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : 'n/a'} />
+        <ChartPanel title="Latencia al gateway" subtitle="Latencia promedio al gateway por defecto" unit="ms">
+          <LineChart points={metrics} grid={grid} series={[["Latencia GW", "gateway_latency_ms", "#f59e0b"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : 'n/a'} />
         </ChartPanel>
-        <ChartPanel
-          title="Uso de disco por unidad o mount"
-          subtitle="Porcentaje usado por filesystem"
-          unit="%"
-        >
-          <LineChart points={pivotDisks(diskHistory, diskNames)} series={diskNames.map((name, index) => [name, name, ['#2563eb', '#059669', '#d97706', '#dc2626'][index]])} max={100} />
+        <ChartPanel title="Uso de disco por unidad o mount" subtitle="Porcentaje usado por filesystem" unit="%">
+          <LineChart points={pivotDisks(rawDiskHistory, diskNames, grid)} grid={grid} series={diskNames.map((name, index) => [name, name, ['#2563eb', '#059669', '#d97706', '#dc2626'][index]])} max={100} />
         </ChartPanel>
       </div>
     </>
@@ -809,12 +810,31 @@ const METRIC_LABELS = { cpu: 'CPU', ram: 'RAM', disk_used_percent: 'Disco', netw
 const METRIC_UNITS = { cpu: '%', ram: '%', disk_used_percent: '%', network_recv_mbps: 'Mbps', network_sent_mbps: 'Mbps', agent_offline_minutes: 'min' };
 
 function AlertRulesPanel({ api }) {
-  const { data, reload } = useLoad(() => api.get('/api/alert-rules/defaults'), [], 0);
   const [rules, setRules] = useState(null);
+  const [smtpOk, setSmtpOk] = useState(false);
+  const [telegramOk, setTelegramOk] = useState(false);
   const [message, setMessage] = useState('');
-  useEffect(() => { if (data?.rules && !rules) setRules(data.rules); }, [data, rules]);
+
+  useEffect(() => {
+    let alive = true;
+    Promise.all([
+      api.get('/api/alert-rules/defaults'),
+      api.get('/api/alert-settings/smtp'),
+      api.get('/api/settings/telegram'),
+    ]).then(([rulesData, smtp, tg]) => {
+      if (!alive) return;
+      setRules(rulesData.rules || []);
+      setSmtpOk(!!(smtp.enabled && smtp.host));
+      setTelegramOk(!!(tg.enabled && tg.chat_ids));
+    }).catch(console.error);
+    return () => { alive = false; };
+  }, []);
+
   if (!rules) return <Skeleton />;
-  const setRule = (index, key, value) => setRules((prev) => prev.map((r, i) => i === index ? { ...r, [key]: value } : r));
+
+  const setRule = (idx, key, value) =>
+    setRules((prev) => prev.map((r, i) => i === idx ? { ...r, [key]: value } : r));
+
   async function save() {
     const validated = rules.map((r) => ({
       ...r,
@@ -822,13 +842,19 @@ function AlertRulesPanel({ api }) {
       duration_samples: Math.max(1, parseInt(r.duration_samples, 10) || 2),
       cooldown_minutes: Math.max(1, parseInt(r.cooldown_minutes, 10) || 30),
     }));
-    const saved = await api.put('/api/alert-rules/defaults', { rules: validated });
-    setRules(saved.rules || []);
-    setMessage('Reglas guardadas');
-    reload();
+    try {
+      const saved = await api.put('/api/alert-rules/defaults', { rules: validated });
+      setRules(saved.rules || []);
+      setMessage('Reglas guardadas');
+    } catch (e) {
+      setMessage('Error: ' + e.message);
+    }
   }
+
   return (
     <Panel title="Reglas globales de alerta" action={<IconButton icon={Save} label="Guardar reglas" onClick={save} />}>
+      {!smtpOk && <p className="warn-inline">SMTP no habilitado — activa SMTP en la pestaña SMTP para usar notificaciones por email</p>}
+      {!telegramOk && <p className="warn-inline">Telegram no habilitado — configura Telegram en la pestaña Telegram para usar notificaciones por Telegram</p>}
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -845,43 +871,35 @@ function AlertRulesPanel({ api }) {
           </thead>
           <tbody>
             {rules.map((rule, i) => (
-              <tr key={rule.id || i}>
+              <tr key={`${rule.metric}-${rule.resource_key}-${rule.severity}`}>
                 <td>{METRIC_LABELS[rule.metric] || rule.metric}{rule.resource_key ? ` (${rule.resource_key})` : ''}</td>
                 <td><span className={`sev-badge ${rule.severity}`}>{rule.severity}</span></td>
                 <td>
-                  <input
-                    type="number"
-                    min="0"
-                    step="any"
-                    value={rule.threshold}
-                    onChange={(e) => setRule(i, 'threshold', e.target.value)}
-                    style={{ width: '70px' }}
-                    title={METRIC_UNITS[rule.metric] || ''}
-                  />
+                  <input type="number" min="0" step="any" value={rule.threshold}
+                    onChange={(e) => setRule(i, 'threshold', e.target.value)} style={{ width: '70px' }} />
                   <small style={{ marginLeft: '4px', color: 'var(--muted, #64748b)' }}>{METRIC_UNITS[rule.metric] || ''}</small>
                 </td>
                 <td>
-                  <input
-                    type="number"
-                    min="1"
-                    max="20"
-                    value={rule.duration_samples}
-                    onChange={(e) => setRule(i, 'duration_samples', e.target.value)}
-                    style={{ width: '55px' }}
-                  />
+                  <input type="number" min="1" max="20" value={rule.duration_samples}
+                    onChange={(e) => setRule(i, 'duration_samples', e.target.value)} style={{ width: '55px' }} />
                 </td>
                 <td>
-                  <input
-                    type="number"
-                    min="1"
-                    value={rule.cooldown_minutes}
-                    onChange={(e) => setRule(i, 'cooldown_minutes', e.target.value)}
-                    style={{ width: '65px' }}
-                  />
+                  <input type="number" min="1" value={rule.cooldown_minutes}
+                    onChange={(e) => setRule(i, 'cooldown_minutes', e.target.value)} style={{ width: '65px' }} />
                 </td>
                 <td><input type="checkbox" checked={!!rule.enabled} onChange={(e) => setRule(i, 'enabled', e.target.checked)} /></td>
-                <td><input type="checkbox" checked={!!rule.notify_email} onChange={(e) => setRule(i, 'notify_email', e.target.checked)} /></td>
-                <td><input type="checkbox" checked={!!rule.notify_telegram} onChange={(e) => setRule(i, 'notify_telegram', e.target.checked)} /></td>
+                <td>
+                  <input type="checkbox" checked={!!rule.notify_email}
+                    disabled={!smtpOk}
+                    title={smtpOk ? '' : 'Configura y activa SMTP primero'}
+                    onChange={(e) => setRule(i, 'notify_email', e.target.checked)} />
+                </td>
+                <td>
+                  <input type="checkbox" checked={!!rule.notify_telegram}
+                    disabled={!telegramOk}
+                    title={telegramOk ? '' : 'Configura y activa Telegram primero'}
+                    onChange={(e) => setRule(i, 'notify_telegram', e.target.checked)} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -1044,19 +1062,57 @@ function Usage({ value }) {
   return <div className="usage"><span style={{ width: `${Math.min(value || 0, 100)}%` }} /><strong>{round(value)}%</strong></div>;
 }
 
-function LineChart({ points, series, max, formatter }) {
+function generateTimeGrid(range) {
+  const now = Date.now();
+  const buckets = { '24h': { ms: 24 * 60 * 60 * 1000, step: 5 * 60 * 1000 }, '7d': { ms: 7 * 24 * 60 * 60 * 1000, step: 60 * 60 * 1000 }, '30d': { ms: 30 * 24 * 60 * 60 * 1000, step: 6 * 60 * 60 * 1000 } };
+  const { ms, step } = buckets[range] || buckets['24h'];
+  const start = now - ms;
+  const grid = [];
+  for (let t = start; t <= now; t += step) {
+    grid.push(new Date(Math.floor(t / step) * step).toISOString());
+  }
+  return grid;
+}
+
+function padHistoryToGrid(data, grid, keys) {
+  if (!data?.length || !grid?.length) {
+    return grid.map((ts) => {
+      const row = { captured_at: ts };
+      keys.forEach((k) => { row[k] = null; });
+      return row;
+    });
+  }
+  const stepMs = (new Date(grid[1] || grid[0]).getTime() - new Date(grid[0]).getTime()) || 60000;
+  const byBucket = {};
+  data.forEach((p) => {
+    const t = new Date(p.captured_at).getTime();
+    const bucket = new Date(Math.round(t / stepMs) * stepMs).toISOString();
+    byBucket[bucket] = p;
+  });
+  return grid.map((ts) => {
+    const match = byBucket[ts];
+    if (match) return match;
+    const row = { captured_at: ts };
+    keys.forEach((k) => { row[k] = null; });
+    return row;
+  });
+}
+
+function LineChart({ points, grid, series, max, formatter }) {
   const [hoverIndex, setHoverIndex] = useState(null);
-  if (!points?.length) return <div className="empty-chart">Sin historial para este rango</div>;
-  const chartMax = max || Math.max(1, ...series.flatMap(([, key]) => points.map((p) => Number(p[key] || 0))));
-  const activeIndex = hoverIndex;
-  const activePoint = activeIndex === null ? null : points[activeIndex];
-  const activeX = activeIndex === null ? 0 : points.length > 1 ? (activeIndex / (points.length - 1)) * 100 : 0;
+  const displayPoints = (points?.length ? points : grid)?.map((p) => (typeof p === 'string' ? { captured_at: p } : p)) || [];
+  if (!displayPoints.length) return <div className="empty-chart">Sin historial disponible</div>;
+
+  const hasAnyData = series.some(([, key]) => displayPoints.some((p) => p[key] != null));
+  const chartMax = max || Math.max(1, ...series.flatMap(([, key]) => displayPoints.map((p) => p[key] != null ? Number(p[key]) : 0)));
+  const activePoint = hoverIndex === null ? null : displayPoints[hoverIndex];
+  const activeX = hoverIndex === null ? 0 : displayPoints.length > 1 ? (hoverIndex / (displayPoints.length - 1)) * 100 : 0;
   const yTicks = axisTicks(chartMax, formatter);
-  const xTicks = timeTicks(points);
+  const xTicks = timeTicks(displayPoints);
   const setHover = (event) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    setHoverIndex(Math.round(ratio * (points.length - 1)));
+    setHoverIndex(Math.round(ratio * (displayPoints.length - 1)));
   };
   return (
     <div className="chart-shell">
@@ -1065,23 +1121,26 @@ function LineChart({ points, series, max, formatter }) {
         <div className="chart-axis y-axis">{yTicks.map((tick, index) => <span key={`${tick}-${index}`}>{tick}</span>)}</div>
         <div className="chart-plot" onMouseMove={setHover} onMouseLeave={() => setHoverIndex(null)}>
           <svg className="chart" viewBox="0 0 100 52" preserveAspectRatio="none">
-            <path d="M0 8 H100" />
-            <path d="M0 18 H100" />
-            <path d="M0 28 H100" />
-            <path d="M0 38 H100" />
-            <path d="M0 48 H100" />
+            <path d="M0 8 H100" /><path d="M0 18 H100" /><path d="M0 28 H100" /><path d="M0 38 H100" /><path d="M0 48 H100" />
             {activePoint && <line className="chart-cursor" x1={activeX} x2={activeX} y1="8" y2="48" />}
-            {series.map(([label, key, color]) => <polyline key={label} points={polyline(points.map((p) => Number(p[key] || 0)), chartMax)} style={{ stroke: color }} />)}
+            {hasAnyData && series.map(([label, key, color]) => (
+              <path key={label} d={polylinePath(displayPoints, key, chartMax)} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+            ))}
             {activePoint && series.map(([label, key, color]) => {
-              const value = Number(activePoint?.[key] || 0);
-              const y = 48 - (Math.max(0, value) / chartMax) * 40;
+              if (activePoint[key] == null) return null;
+              const y = 48 - (Math.max(0, Number(activePoint[key])) / chartMax) * 40;
               return <circle key={`${label}-dot`} cx={activeX} cy={y} r="1.1" style={{ fill: color }} />;
             })}
           </svg>
+          {!hasAnyData && <div className="chart-no-data">Sin datos en este rango</div>}
           {activePoint && (
             <div className="chart-tooltip" style={{ left: `${Math.min(Math.max(activeX, 12), 88)}%` }}>
               <strong>{timeLabel(activePoint.captured_at)}</strong>
-              {series.map(([label, key, color]) => <span key={label}><i style={{ background: color }} />{label}<b>{formatter ? formatter(activePoint[key]) : `${round(activePoint[key])}%`}</b></span>)}
+              {series.map(([label, key, color]) => (
+                <span key={label}><i style={{ background: color }} />{label}
+                  <b>{activePoint[key] != null ? (formatter ? formatter(activePoint[key]) : `${round(activePoint[key])}%`) : '—'}</b>
+                </span>
+              ))}
             </div>
           )}
         </div>
@@ -1101,12 +1160,21 @@ function timeTicks(points) {
   return [0, 0.25, 0.5, 0.75, 1].map((ratio) => points[Math.round(ratio * maxIndex)]).filter(Boolean).map((point) => timeLabel(point.captured_at));
 }
 
-function polyline(values, maxValue) {
-  const maxIndex = Math.max(values.length - 1, 1);
-  return values.map((value, index) => `${((index / maxIndex) * 100).toFixed(2)},${(48 - (Math.max(0, value) / maxValue) * 40).toFixed(2)}`).join(' ');
+function polylinePath(points, key, maxValue) {
+  let d = '';
+  const maxIndex = Math.max(points.length - 1, 1);
+  let penUp = true;
+  points.forEach((p, index) => {
+    if (p[key] == null) { penUp = true; return; }
+    const x = ((index / maxIndex) * 100).toFixed(2);
+    const y = (48 - (Math.max(0, Number(p[key])) / maxValue) * 40).toFixed(2);
+    d += penUp ? `M${x},${y}` : `L${x},${y}`;
+    penUp = false;
+  });
+  return d;
 }
 
-function pivotDisks(disks, names) {
+function pivotDisks(disks, names, grid) {
   const byTime = {};
   disks.forEach((disk) => {
     const key = disk.captured_at;
@@ -1114,7 +1182,13 @@ function pivotDisks(disks, names) {
     const name = disk.mountpoint || disk.name;
     if (names.includes(name)) byTime[key][name] = disk.used_percent;
   });
-  return Object.values(byTime);
+  if (!grid?.length) return Object.values(byTime);
+  return grid.map((ts) => {
+    if (byTime[ts]) return byTime[ts];
+    const row = { captured_at: ts };
+    names.forEach((n) => { row[n] = null; });
+    return row;
+  });
 }
 
 function latestDiskValues(disks) {
