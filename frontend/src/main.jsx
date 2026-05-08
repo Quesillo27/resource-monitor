@@ -331,7 +331,7 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
 
 function AgentDetail({ api, agentId, onBack }) {
   const [tab, setTab] = useState('summary');
-  const [range, setRange] = useState('24h');
+  const [range, setRange] = useState('1h');
   const [deleting, setDeleting] = useState(false);
 
   const { data, loading, reload, lastUpdated } = useLoad(async () => {
