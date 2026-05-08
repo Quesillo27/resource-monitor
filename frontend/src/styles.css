@@ -933,14 +933,14 @@ label span {
 .rules-card-head h3 { margin: 0; font-size: 14px; font-weight: 700; color: var(--text-primary); letter-spacing: 0.01em; }
 .rules-card-head svg { color: var(--text-secondary); }
 
-.rule-row { display: grid; grid-template-columns: minmax(80px, auto) 1fr auto; gap: 14px; align-items: center; padding: 14px 0; border-top: 1px solid var(--border); }
+.rule-row { display: flex; flex-wrap: wrap; gap: 16px; row-gap: 12px; align-items: center; padding: 14px 0; border-top: 1px solid var(--border); }
 .rule-row:first-of-type { border-top: 0; padding-top: 4px; }
-.rule-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+.rule-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; flex: 0 0 78px; }
 .rule-meta .sev-badge { width: fit-content; }
 .rule-source { padding: 2px 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; background: #ede9fe; color: #6d28d9; border-radius: 999px; letter-spacing: 0.04em; white-space: nowrap; }
 
-.rule-fields { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; min-width: 0; }
-.rule-toggles { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; justify-content: flex-end; }
+.rule-fields { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; flex: 1 1 280px; min-width: 0; }
+.rule-toggles { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; flex: 0 0 auto; margin-left: auto; }
 
 .rule-field { display: grid; gap: 4px; min-width: 0; }
 .rule-field span { font-size: 11px; color: var(--text-secondary); font-weight: 600; white-space: nowrap; }
@@ -977,13 +977,13 @@ label span {
 .status-msg.err { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
 
 @media (max-width: 1100px) {
-  .rule-row { grid-template-columns: 1fr; gap: 10px; }
-  .rule-toggles { justify-content: flex-start; }
+  .rule-toggles { margin-left: 0; }
   .rules-help { grid-template-columns: 1fr; }
 }
 @media (max-width: 720px) {
   .rules-grid { grid-template-columns: 1fr; }
   .rule-fields { gap: 10px; }
+  .rule-meta { flex: 0 0 auto; }
 }
 
 /* ── Install result ── */
