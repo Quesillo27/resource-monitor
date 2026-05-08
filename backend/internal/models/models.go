@@ -210,3 +210,36 @@ type Alert struct {
 	SeenByUserID              *string      `json:"seen_by_user_id,omitempty"`
 	SeenByUsername            *string      `json:"seen_by_username,omitempty"`
 }
+
+type HardwareInfo struct {
+	CPUModel        string  `json:"cpu_model"`
+	CPUVendor       string  `json:"cpu_vendor"`
+	CPUCoresPhys    int     `json:"cpu_cores_physical"`
+	CPUCoresLogical int     `json:"cpu_cores_logical"`
+	CPUMhz          float64 `json:"cpu_mhz"`
+	MemoryTotalGB   float64 `json:"memory_total_gb"`
+	KernelVersion   string  `json:"kernel_version"`
+	Virtualization  string  `json:"virtualization"`
+	Arch            string  `json:"arch"`
+}
+
+type HardwareSnapshot struct {
+	HardwareInfo
+	CapturedAt time.Time `json:"captured_at"`
+}
+
+type SoftwareItem struct {
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Publisher string `json:"publisher,omitempty"`
+}
+
+type InventoryRequest struct {
+	Hardware HardwareInfo   `json:"hardware"`
+	Software []SoftwareItem `json:"software"`
+}
+
+type InventoryResponse struct {
+	Hardware *HardwareSnapshot `json:"hardware,omitempty"`
+	Software []SoftwareItem    `json:"software"`
+}

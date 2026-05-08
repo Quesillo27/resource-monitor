@@ -1143,4 +1143,128 @@ label span {
   .health-hero { flex-direction: column; gap: 14px; }
   .chart-toolbar { flex-direction: column; align-items: flex-start; }
   .form-grid, .smtp-grid { grid-template-columns: 1fr; }
+  .enroll-layout { grid-template-columns: 1fr; }
+  .platform-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* ── Hardware tab ── */
+.hw-grid {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.hw-row {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.hw-row:last-child { border-bottom: none; }
+.hw-row:nth-child(even) { background: #f8fafc; }
+.hw-label { color: var(--text-secondary); font-size: 13px; min-width: 160px; flex-shrink: 0; }
+.hw-value { font-size: 13px; color: var(--text-primary); font-weight: 500; word-break: break-all; }
+
+/* ── Software tab ── */
+.sw-search { padding: 0 0 12px; }
+.sw-input {
+  width: 100%;
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--text-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+.sw-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+
+/* ── Enrollment redesign ── */
+.enroll-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  align-items: start;
+}
+.enroll-form-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+}
+.enroll-section { margin-bottom: 28px; }
+.enroll-section:last-of-type { margin-bottom: 0; }
+.enroll-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+.enroll-step {
+  width: 24px;
+  height: 24px;
+  background: var(--blue);
+  color: #fff;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.platform-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.platform-card {
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  background: var(--surface);
+  transition: border-color .15s, background .15s;
+  text-align: center;
+}
+.platform-card:hover { border-color: var(--blue); background: var(--blue-light); }
+.platform-card.selected { border-color: var(--blue); background: var(--blue-light); }
+.platform-icon { font-size: 28px; line-height: 1; }
+.platform-card strong { font-size: 14px; color: var(--text-primary); }
+.platform-sub { font-size: 11px; color: var(--text-secondary); }
+.enroll-fields { display: flex; flex-direction: column; gap: 14px; }
+.field-hint { font-size: 11px; color: var(--text-secondary); font-weight: 400; margin-left: 6px; }
+.enroll-submit { width: 100%; margin-top: 24px; padding: 12px; font-size: 14px; }
+
+/* ── Enrollment sidebar ── */
+.enroll-sidebar { display: flex; flex-direction: column; gap: 16px; }
+.enroll-info-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.enroll-info-card h3 { font-size: 13px; font-weight: 600; color: var(--text-primary); margin: 0 0 12px; }
+.enroll-steps-list, .enroll-feature-list {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.enroll-steps-list li, .enroll-feature-list li { font-size: 13px; color: var(--text-secondary); }
+.enroll-steps-list strong { color: var(--text-primary); }
+.enroll-feature-list { list-style: disc; }
+.warning-card { border-color: #fbbf24; background: #fffbeb; }
+.warning-card h3 { color: #92400e; }
+.warning-card p { font-size: 12px; color: #78350f; margin: 0; line-height: 1.6; }
+.warning-card code { background: #fef3c7; padding: 1px 4px; border-radius: 3px; font-size: 11px; }

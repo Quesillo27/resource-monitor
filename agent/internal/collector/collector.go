@@ -66,6 +66,17 @@ type SvcMetric struct {
 	Status string `json:"status"`
 }
 
+type SoftwareItem struct {
+	Name      string `json:"name"`
+	Version   string `json:"version"`
+	Publisher string `json:"publisher,omitempty"`
+}
+
+type Inventory struct {
+	Hardware HardwareInfo   `json:"hardware"`
+	Software []SoftwareItem `json:"software"`
+}
+
 func HostInfo() (Host, error) {
 	info, err := host.Info()
 	if err != nil {

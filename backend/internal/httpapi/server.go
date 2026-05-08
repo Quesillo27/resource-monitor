@@ -58,6 +58,7 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin", "operator")).Patch("/agents/{id}", s.updateAgent)
 			r.With(s.requireRole("admin", "operator")).Delete("/agents/{id}", s.deleteAgent)
 			r.With(s.requireRole("admin", "operator")).Post("/enrollment-tokens", s.createEnrollmentToken)
+			r.Get("/agents/{id}/inventory", s.getAgentInventory)
 
 			r.With(s.requireRole("admin")).Put("/alert-rules/defaults", s.saveDefaultAlertRules)
 			r.With(s.requireRole("admin")).Get("/alert-settings/smtp", s.getSMTPSettings)
@@ -80,6 +81,7 @@ func (s *Server) Routes() http.Handler {
 			r.Use(s.requireAgent)
 			r.Post("/agent/heartbeat", s.heartbeat)
 			r.Post("/agent/metrics", s.metrics)
+			r.Post("/agent/inventory", s.agentInventory)
 		})
 	})
 
@@ -541,6 +543,28 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = s.store.NotifyDueAlertsV31(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
+}
+
+func (s *Server) agentInventory(w http.ResponseWriter, r *http.Request) {
+	var req models.InventoryRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	agentID, _ := r.Context().Value(agentIDKey{}).(string)
+	if err := s.store.SaveInventory(r.Context(), agentID, req); err != nil {
+		writeError(w, http.StatusInternalServerError, "inventory save failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
+}
+
+func (s *Server) getAgentInventory(w http.ResponseWriter, r *http.Request) {
+	inv, err := s.store.GetInventory(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "inventory fetch failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, inv)
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {

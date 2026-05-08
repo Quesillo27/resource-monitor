@@ -54,6 +54,10 @@ func (c *Client) SendMetrics(ctx context.Context, metrics collector.Metrics) err
 	return c.post(ctx, "/api/agent/metrics", metrics, true, nil)
 }
 
+func (c *Client) SendInventory(ctx context.Context, inv collector.Inventory) error {
+	return c.post(ctx, "/api/agent/inventory", inv, true, nil)
+}
+
 func (c *Client) post(ctx context.Context, path string, payload any, auth bool, out any) error {
 	if c.baseURL == "" {
 		return fmt.Errorf("server URL is required")

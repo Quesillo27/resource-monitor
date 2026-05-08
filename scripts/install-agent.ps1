@@ -15,12 +15,12 @@ $ErrorActionPreference = "Stop"
 
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  throw "Run this installer from an elevated PowerShell session."
+  throw "Ejecuta este instalador desde una sesion elevada de PowerShell (Ejecutar como administrador)."
 }
 
 $configPath = "C:\ProgramData\ResourceMonitorAgent\config.json"
 if ($EnrollmentToken -eq "" -and -not (Test-Path $configPath)) {
-  throw "EnrollmentToken is required for first install. Existing installs can update without a token."
+  throw "EnrollmentToken es requerido para la primera instalacion. Las reinstalaciones pueden omitirlo."
 }
 
 $repo = "Quesillo27/resource-monitor"
@@ -36,30 +36,46 @@ $installDir = Join-Path $env:ProgramFiles "ResourceMonitorAgent"
 $installPath = Join-Path $installDir "resource-monitor-agent.exe"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
-if (Get-Service resource-monitor-agent -ErrorAction SilentlyContinue) {
-  Stop-Service resource-monitor-agent -ErrorAction SilentlyContinue
+$svc = Get-Service resource-monitor-agent -ErrorAction SilentlyContinue
+if ($svc) {
+  Write-Host "Deteniendo servicio existente..."
+  Stop-Service resource-monitor-agent -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
 }
 
 $assetUrl = "$baseUrl/resource-monitor-agent-windows-amd64.exe"
-if ($AgentUrl -ne "") {
-  $assetUrl = $AgentUrl
-}
-Write-Host "Downloading $assetUrl..."
+if ($AgentUrl -ne "") { $assetUrl = $AgentUrl }
+
+Write-Host "Descargando agente desde $assetUrl..."
 try {
-  Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing
+  Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing -TimeoutSec 60
 } catch {
-  throw "Could not download the Windows agent binary from $assetUrl. Original error: $($_.Exception.Message)"
+  $msg = $_.Exception.Message
+  Write-Host ""
+  Write-Host "ERROR: No se pudo descargar el agente." -ForegroundColor Red
+  Write-Host "  URL: $assetUrl" -ForegroundColor Yellow
+  Write-Host "  Causa: $msg" -ForegroundColor Yellow
+  Write-Host ""
+  Write-Host "Verifica que:" -ForegroundColor Cyan
+  Write-Host "  - El servidor esta accesible desde esta maquina"
+  Write-Host "  - La URL de descargas es correcta (incluye el puerto si aplica)"
+  Write-Host "  - No hay firewall bloqueando la conexion"
+  throw "Descarga fallida: $msg"
 }
 
-Write-Host "Installing or updating resource-monitor-agent..."
-$args = @("install", "--server-url", $ServerUrl, "--interval", $Interval, "--profile", $Profile)
-if ($EnrollmentToken -ne "") { $args += @("--enrollment-token", $EnrollmentToken) }
-if ($Name -ne "") { $args += @("--name", $Name) }
-if ($Services -ne "") { $args += @("--services", $Services) }
-& $installPath @args
+Write-Host "Instalando/actualizando resource-monitor-agent..."
+$installArgs = @("install", "--server-url", $ServerUrl, "--interval", $Interval, "--profile", $Profile)
+if ($EnrollmentToken -ne "") { $installArgs += @("--enrollment-token", $EnrollmentToken) }
+if ($Name -ne "") { $installArgs += @("--name", $Name) }
+if ($Services -ne "") { $installArgs += @("--services", $Services) }
+& $installPath @installArgs
 
+Write-Host "Iniciando servicio..."
 Start-Service resource-monitor-agent -ErrorAction SilentlyContinue
-Write-Host "Running agent doctor..."
+Start-Sleep -Seconds 3
+
+Write-Host "Verificando agente..."
 & $installPath doctor --config $configPath
 Get-Service resource-monitor-agent
-Write-Host "Resource Monitor agent installation/update complete."
+Write-Host ""
+Write-Host "Instalacion completada." -ForegroundColor Green

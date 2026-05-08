@@ -151,6 +151,7 @@ func runCmd(args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
+	go runInventoryLoop(ctx, loaded)
 	if err := runLoop(ctx, loaded); err != nil {
 		log.Fatal(err)
 	}
@@ -281,6 +282,36 @@ func sendOnceWithRetry(ctx context.Context, cfg config.Config) {
 			continue
 		}
 		return
+	}
+}
+
+func runInventoryLoop(ctx context.Context, cfg config.Config) {
+	sendInventory(ctx, cfg)
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sendInventory(ctx, cfg)
+		}
+	}
+}
+
+func sendInventory(ctx context.Context, cfg config.Config) {
+	if cfg.Credential == "" {
+		return
+	}
+	inv := collector.Inventory{
+		Hardware: collector.CollectHardware(),
+		Software: collector.CollectSoftware(),
+	}
+	api := client.New(cfg.ServerURL, cfg.Credential)
+	if err := api.SendInventory(ctx, inv); err != nil {
+		log.Printf("inventory send failed: %v", err)
+	} else {
+		log.Printf("inventory sent hardware=%s software=%d", inv.Hardware.CPUModel, len(inv.Software))
 	}
 }
 

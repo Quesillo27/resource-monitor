@@ -506,7 +506,8 @@ func installCommandV3(serverURL, downloadURL, token, agentName, style, releaseVe
 		optional += " --services " + shellQuoteV3(services)
 	}
 	if strings.EqualFold(style, "windows") {
-		return fmt.Sprintf("iwr %s/install-agent.ps1 -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl %s -DownloadUrl %s -EnrollmentToken %s%s -Profile %s -Interval %d", downloadBase, serverURL, downloadBase, token, strings.ReplaceAll(nameArg, " --name ", " -Name "), profile, interval)
+		psNameArg := strings.ReplaceAll(nameArg, " --name ", " -Name ")
+		return fmt.Sprintf("iwr %s/install-agent.ps1 -OutFile install-agent.ps1 -ErrorAction Stop; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl %s -DownloadUrl %s -EnrollmentToken %s%s -Profile %s -Interval %d", downloadBase, serverURL, downloadBase, token, psNameArg, profile, interval)
 	}
 	return fmt.Sprintf("curl -fsSL %s/install-agent.sh | sudo bash -s -- --server-url %s --download-url %s --enrollment-token %s%s%s", downloadBase, shellQuoteV3(serverURL), shellQuoteV3(downloadBase), shellQuoteV3(token), nameArg, optional)
 }

@@ -207,6 +207,7 @@ function AgentDetail({ api, agentId, onBack }) {
     ]);
     return { ...detail, agent_status: status, range_history: history };
   }, [agentId, range], REFRESH_MS);
+  const { data: inventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
   const agent = data?.agent;
   const disks = sortBy(data?.disks || [], (disk) => disk.used_percent);
   const networks = sortBy(data?.networks || [], (net) => net.up ? 0 : 1);
@@ -231,7 +232,7 @@ function AgentDetail({ api, agentId, onBack }) {
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span></div>
           <div className="tab-row">
-            {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
+            {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
           {tab === 'resources' && <ResourcesTab agent={agent} history={data.range_history} disks={disks} networks={networks} range={range} setRange={setRange} />}
@@ -240,6 +241,8 @@ function AgentDetail({ api, agentId, onBack }) {
           {tab === 'processes' && <ProcessesTable processes={processes} />}
           {tab === 'services' && <ServicesTable services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} />}
+          {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} />}
+          {tab === 'software' && <SoftwareTab software={inventory?.software} />}
         </>
       )}
     </section>
@@ -346,15 +349,28 @@ function Enrollment({ api }) {
   const [profile, setProfile] = useState('balanced');
   const [interval, setIntervalValue] = useState(60);
   const [services, setServices] = useState('');
+  const [ttl, setTtl] = useState(24);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
   async function createToken(event) {
     event.preventDefault();
     setLoading(true);
     setError('');
     try {
-      const data = await api.post('/api/enrollment-tokens', { name: agentName || 'Alta agente', ttl_hours: 24, server_url: serverUrl, download_url: downloadUrl, agent_name: agentName, install_style: platform, release_version: 'latest', profile, services, interval: Number(interval) });
+      const data = await api.post('/api/enrollment-tokens', {
+        name: agentName || 'Alta agente',
+        ttl_hours: Number(ttl),
+        server_url: serverUrl,
+        download_url: downloadUrl,
+        agent_name: agentName,
+        install_style: platform,
+        release_version: 'latest',
+        profile,
+        services,
+        interval: Number(interval),
+      });
       setResult(data);
     } catch (err) {
       setError(err.message || 'No se pudo generar el token');
@@ -362,21 +378,104 @@ function Enrollment({ api }) {
       setLoading(false);
     }
   }
+
   return (
     <section>
       <Header title="Alta de agente" />
-      <div className="wizard">
-        <form className="enroll-form" onSubmit={createToken}>
-          <WizardStep index="1" title="Plataforma"><div className="segmented"><button type="button" className={platform === 'linux' ? 'selected' : ''} onClick={() => setPlatform('linux')}>Linux</button><button type="button" className={platform === 'windows' ? 'selected' : ''} onClick={() => setPlatform('windows')}>Windows</button></div></WizardStep>
-          <WizardStep index="2" title="Conectividad"><label>URL API<input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} /></label><label>URL descargas LAN<input value={downloadUrl} onChange={(e) => setDownloadUrl(e.target.value)} /></label></WizardStep>
-          <WizardStep index="3" title="Perfil"><label>Nombre del equipo<input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="Opcional" /></label><div className="form-grid"><label>Perfil<select value={profile} onChange={(e) => setProfile(e.target.value)}><option value="balanced">balanced</option><option value="minimal">minimal</option></select></label><label>Intervalo<input type="number" min="30" value={interval} onChange={(e) => setIntervalValue(e.target.value)} /></label></div><label>Servicios criticos<input value={services} onChange={(e) => setServices(e.target.value)} placeholder="nginx,postgres,sqlservr" /></label></WizardStep>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary" disabled={loading}>{loading ? 'Generando...' : 'Generar token y comando'}</button>
-        </form>
-        <Panel title="Verificacion esperada">
-          <div className="check-list"><span><CheckCircle2 size={18} /> Descarga desde LAN</span><span><CheckCircle2 size={18} /> Registro con token unico</span><span><CheckCircle2 size={18} /> Servicio activo</span><span><CheckCircle2 size={18} /> Primera metrica en menos de 60s</span></div>
-        </Panel>
+      <div className="enroll-layout">
+        <div className="enroll-form-card">
+          <form className="enroll-form" onSubmit={createToken}>
+            <div className="enroll-section">
+              <div className="enroll-section-title"><span className="enroll-step">1</span>Plataforma de destino</div>
+              <div className="platform-grid">
+                {[['linux', '🐧', 'Linux', 'Debian, Ubuntu, RHEL, Alpine'],['windows', '🪟', 'Windows', 'Windows 10/11, Server 2016+']].map(([val, icon, label, sub]) => (
+                  <button key={val} type="button" className={`platform-card ${platform === val ? 'selected' : ''}`} onClick={() => setPlatform(val)}>
+                    <span className="platform-icon">{icon}</span>
+                    <strong>{label}</strong>
+                    <span className="platform-sub">{sub}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="enroll-section">
+              <div className="enroll-section-title"><span className="enroll-step">2</span>Identidad del equipo</div>
+              <div className="enroll-fields">
+                <label>Nombre del equipo <span className="field-hint">opcional — se usa como hostname si se omite</span>
+                  <input value={agentName} onChange={(e) => setAgentName(e.target.value)} placeholder="ej. servidor-web-01" />
+                </label>
+                <div className="form-grid">
+                  <label>Perfil de recolección
+                    <select value={profile} onChange={(e) => setProfile(e.target.value)}>
+                      <option value="balanced">Balanceado — CPU, RAM, disco, red, procesos</option>
+                      <option value="minimal">Mínimo — solo CPU, RAM y disco</option>
+                    </select>
+                  </label>
+                  <label>Intervalo (segundos)
+                    <input type="number" min="30" max="3600" value={interval} onChange={(e) => setIntervalValue(e.target.value)} />
+                  </label>
+                </div>
+                <label>Servicios críticos a monitorear <span className="field-hint">separados por coma</span>
+                  <input value={services} onChange={(e) => setServices(e.target.value)} placeholder="nginx, postgres, sqlservr" />
+                </label>
+              </div>
+            </div>
+
+            <div className="enroll-section">
+              <div className="enroll-section-title"><span className="enroll-step">3</span>Conectividad</div>
+              <div className="enroll-fields">
+                <label>URL del servidor API <span className="field-hint">accesible desde el equipo destino</span>
+                  <input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} placeholder="https://monitor.empresa.com" />
+                </label>
+                <label>URL de descarga del agente <span className="field-hint">puede ser URL LAN para instalaciones internas</span>
+                  <input value={downloadUrl} onChange={(e) => setDownloadUrl(e.target.value)} placeholder="https://monitor.empresa.com/downloads" />
+                </label>
+                <label>Validez del token
+                  <select value={ttl} onChange={(e) => setTtl(e.target.value)}>
+                    <option value="1">1 hora</option>
+                    <option value="8">8 horas</option>
+                    <option value="24">24 horas</option>
+                    <option value="72">72 horas</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {error && <p className="form-error">{error}</p>}
+            <button className="primary enroll-submit" disabled={loading}>
+              {loading ? 'Generando token...' : 'Generar token e instrucciones de instalación'}
+            </button>
+          </form>
+        </div>
+
+        <div className="enroll-sidebar">
+          <div className="enroll-info-card">
+            <h3>Proceso de instalación</h3>
+            <ol className="enroll-steps-list">
+              <li><strong>Copia el comando</strong> generado</li>
+              <li><strong>Ejecútalo</strong> en el equipo destino como administrador</li>
+              <li><strong>El agente se registra</strong> automáticamente con el token</li>
+              <li><strong>Aparece en el dashboard</strong> en menos de 60 segundos</li>
+            </ol>
+          </div>
+          <div className="enroll-info-card">
+            <h3>El agente recopila</h3>
+            <ul className="enroll-feature-list">
+              <li>CPU, RAM, swap en tiempo real</li>
+              <li>Todos los discos y particiones</li>
+              <li>Interfaces de red activas</li>
+              <li>Top 10 procesos por consumo</li>
+              <li>Estado de servicios configurados</li>
+              <li>Inventario de hardware y software (24h)</li>
+            </ul>
+          </div>
+          <div className="enroll-info-card warning-card">
+            <h3>⚠️ Conectividad LAN</h3>
+            <p>Si instalas en una red local, la URL del servidor debe incluir el puerto correcto. Por ejemplo: <code>http://192.168.1.10:3010</code></p>
+          </div>
+        </div>
       </div>
+
       {result && <EnrollResult result={result} platform={platform} />}
     </section>
   );
@@ -536,6 +635,50 @@ function ServicesTable({ services }) {
 
 function DataTable({ columns, rows, empty }) {
   return <div className="table-wrap"><table><thead><tr>{columns.map((col) => <th key={col}>{col}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length} className="empty">{empty}</td></tr>}</tbody></table></div>;
+}
+
+function HardwareTab({ hardware }) {
+  if (!hardware) return <EmptyState icon="🖥️" title="Sin datos de hardware" subtitle="El agente enviará el inventario de hardware en su próxima sincronización (24h)." />;
+  const rows = [
+    ['CPU', hardware.cpu_model || '—'],
+    ['Fabricante', hardware.cpu_vendor || '—'],
+    ['Núcleos físicos', hardware.cpu_cores_physical || '—'],
+    ['Núcleos lógicos', hardware.cpu_cores_logical || '—'],
+    ['Frecuencia base', hardware.cpu_mhz ? `${hardware.cpu_mhz.toFixed(0)} MHz` : '—'],
+    ['RAM total', hardware.memory_total_gb ? `${hardware.memory_total_gb.toFixed(1)} GB` : '—'],
+    ['Arquitectura', hardware.arch || '—'],
+    ['Kernel', hardware.kernel_version || '—'],
+    ['Virtualización', hardware.virtualization || 'Ninguna detectada'],
+    ['Capturado', hardware.captured_at ? new Date(hardware.captured_at).toLocaleString() : '—'],
+  ];
+  return (
+    <div className="hw-grid">
+      {rows.map(([label, value]) => (
+        <div key={label} className="hw-row">
+          <span className="hw-label">{label}</span>
+          <span className="hw-value">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SoftwareTab({ software }) {
+  const [q, setQ] = useState('');
+  if (!software) return <EmptyState icon="📦" title="Sin inventario de software" subtitle="El agente enviará el inventario en su próxima sincronización (24h)." />;
+  const filtered = q ? software.filter((s) => s.name.toLowerCase().includes(q.toLowerCase()) || (s.publisher || '').toLowerCase().includes(q.toLowerCase())) : software;
+  return (
+    <div>
+      <div className="sw-search">
+        <input className="sw-input" placeholder={`Buscar en ${software.length} programas...`} value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <DataTable
+        empty="Sin resultados"
+        columns={['Programa', 'Versión', 'Editor']}
+        rows={filtered.map((s) => [s.name, s.version || '—', s.publisher || '—'])}
+      />
+    </div>
+  );
 }
 
 function Usage({ value }) {
@@ -779,7 +922,7 @@ function sortBy(items, score) {
 }
 
 function tabLabel(item) {
-  return ({ summary: 'Resumen', resources: 'Recursos', disks: 'Discos', network: 'Red', processes: 'Procesos', services: 'Servicios', alerts: 'Alertas' })[item] || item;
+  return ({ summary: 'Resumen', resources: 'Recursos', disks: 'Discos', network: 'Red', processes: 'Procesos', services: 'Servicios', alerts: 'Alertas', hardware: 'Hardware', software: 'Software' })[item] || item;
 }
 
 function round(value) {
