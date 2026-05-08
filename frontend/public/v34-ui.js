@@ -1,6 +1,7 @@
 (() => {
   let currentAgentId = '';
   let currentHistory = null;
+  let currentAgentDetail = null;
   let preferredRange = sessionStorage.getItem('rm_history_range') || '';
 
   const API_BASE = `${window.location.protocol}//${window.location.hostname}:8080`;
@@ -39,7 +40,10 @@
     const cloned = response.clone();
     cloned.json().then((data) => {
       const agentMatch = url.match(/\/api\/agents\/([^/?]+)/);
-      if (agentMatch && !url.includes('/history') && !url.includes('/networks')) currentAgentId = agentMatch[1];
+      if (agentMatch && !url.includes('/history') && !url.includes('/networks')) {
+        currentAgentId = agentMatch[1];
+        if (!url.includes('/status') && !url.includes('/alert-rules')) currentAgentDetail = data;
+      }
       if (url.includes('/history')) currentHistory = data;
     }).catch(() => {});
     return response;
@@ -112,9 +116,10 @@
   function replaceSwapRing() {
     const cards = [...document.querySelectorAll('.ring-card')];
     const swap = cards.find((card) => card.textContent.includes('Swap'));
-    if (!swap || !currentHistory?.metrics?.length) return;
-    const last = currentHistory.metrics[currentHistory.metrics.length - 1] || {};
-    const cpu = Number(last.cpu_percent || 0);
+    if (!swap) return;
+    const historyMetrics = currentHistory?.metrics || [];
+    const last = historyMetrics[historyMetrics.length - 1] || {};
+    const cpu = Number(currentAgentDetail?.agent?.cpu_percent ?? last.cpu_percent ?? 0);
     swap.querySelector('strong').textContent = 'CPU';
     swap.querySelector('small').textContent = `${cpu.toFixed(1)}% / 100%`;
     const ring = swap.querySelector('.ring');
