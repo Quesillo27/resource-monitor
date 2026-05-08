@@ -329,6 +329,7 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
 function AgentDetail({ api, agentId, onBack }) {
   const [tab, setTab] = useState('summary');
   const [range, setRange] = useState('24h');
+  const [deleting, setDeleting] = useState(false);
 
   const { data, loading, reload, lastUpdated } = useLoad(async () => {
     const [detail, status] = await Promise.all([
@@ -359,12 +360,18 @@ function AgentDetail({ api, agentId, onBack }) {
   }
   async function deleteAgent() {
     if (!window.confirm('Eliminar este equipo y sus metricas historicas?')) return;
-    await api.delete(`/api/agents/${agentId}`);
-    onBack();
+    setDeleting(true);
+    try {
+      await api.delete(`/api/agents/${agentId}`);
+      onBack();
+    } catch {
+      setDeleting(false);
+      alert('Error al eliminar el equipo. Intenta de nuevo.');
+    }
   }
   return (
     <section>
-      <Header title={agent?.name || 'Equipo'} meta={<div className="actions"><button onClick={onBack}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" /><IconButton icon={Trash2} onClick={deleteAgent} label="Eliminar" /><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} /></div>} />
+      <Header title={agent?.name || 'Equipo'} meta={<div className="actions"><button onClick={onBack} disabled={deleting}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" disabled={deleting} /><IconButton icon={Trash2} onClick={deleteAgent} label={deleting ? 'Eliminando…' : 'Eliminar'} disabled={deleting} /><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} /></div>} />
       {agent && (
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span></div>

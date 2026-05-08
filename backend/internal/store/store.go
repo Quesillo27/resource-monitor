@@ -214,14 +214,27 @@ func (s *Store) RegisterAgent(ctx context.Context, req models.AgentRegisterReque
 	if name == "" {
 		name = req.Hostname
 	}
+
+	// Reuse existing agent if same hostname (reinstall/update scenario)
 	var agentID string
-	err = tx.QueryRow(ctx, `
-		INSERT INTO agents (name, hostname, os, arch, uptime_seconds, credential_hash, status, last_seen_at)
-		VALUES ($1, $2, $3, $4, $5, $6, 'online', now())
-		RETURNING id::text
-	`, name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), hashSecret(credential)).Scan(&agentID)
-	if err != nil {
-		return nil, err
+	existErr := tx.QueryRow(ctx, `SELECT id::text FROM agents WHERE hostname = $1`, req.Hostname).Scan(&agentID)
+	if existErr == nil {
+		// Agent exists — rotate credential only, preserve history
+		if _, err = tx.Exec(ctx, `
+			UPDATE agents SET credential_hash=$1, os=$2, arch=$3, status='online', last_seen_at=now(), updated_at=now()
+			WHERE id=$4
+		`, hashSecret(credential), req.OS, req.Arch, agentID); err != nil {
+			return nil, err
+		}
+	} else {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO agents (name, hostname, os, arch, uptime_seconds, credential_hash, status, last_seen_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'online', now())
+			RETURNING id::text
+		`, name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), hashSecret(credential)).Scan(&agentID)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, "UPDATE enrollment_tokens SET used_at = now() WHERE id = $1", tokenID); err != nil {
