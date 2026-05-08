@@ -30,7 +30,10 @@ import './styles.css';
 import './resources-polish.css';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
-const REFRESH_MS = 60000;
+const REFRESH_MS       = 60_000; // overview + alertas
+const LIST_REFRESH_MS  = 30_000; // lista de agentes
+const STATUS_REFRESH_MS =  5_000; // estado/detail del agente
+const CHART_REFRESH_MS = 15_000; // historial para graficas
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('rm_token') || '');
@@ -229,7 +232,7 @@ function Agents({ api, onSelect }) {
     let url = `/api/agents?q=${encodeURIComponent(query)}`;
     if (tagFilter) url += `&tag=${encodeURIComponent(tagFilter)}`;
     return api.get(url);
-  }, [query, tagFilter], REFRESH_MS);
+  }, [query, tagFilter], LIST_REFRESH_MS);
   const agents = data?.agents || [];
   const osOptions = useMemo(() => {
     const seen = new Set();
@@ -337,12 +340,12 @@ function AgentDetail({ api, agentId, onBack }) {
       api.get(`/api/agents/${agentId}/status`),
     ]);
     return { ...detail, agent_status: status };
-  }, [agentId], REFRESH_MS);
+  }, [agentId], STATUS_REFRESH_MS);
 
   const { data: historyData, loading: historyLoading } = useLoad(
     () => api.get(`/api/agents/${agentId}/history?range=${range}`),
     [agentId, range],
-    REFRESH_MS
+    CHART_REFRESH_MS
   );
 
   const { data: inventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
