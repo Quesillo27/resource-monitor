@@ -43,6 +43,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/dashboard/summary", s.dashboardSummary)
 			r.Get("/dashboard/overview", s.dashboardOverview)
 			r.Get("/agents", s.listAgents)
+			r.Get("/tags", s.listTags)
 			r.Get("/agents/{id}", s.agentDetail)
 			r.Get("/agents/{id}/history", s.agentHistory)
 			r.Get("/agents/{id}/networks", s.agentNetworks)
@@ -138,12 +139,24 @@ func (s *Server) dashboardOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
-	agents, err := s.store.ListAgents(r.Context(), s.cfg.OfflineAfterSeconds, r.URL.Query().Get("q"))
+	agents, err := s.store.ListAgents(r.Context(), s.cfg.OfflineAfterSeconds, r.URL.Query().Get("q"), r.URL.Query().Get("tag"))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "agents failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"agents": agents})
+}
+
+func (s *Server) listTags(w http.ResponseWriter, r *http.Request) {
+	tags, err := s.store.ListAllTags(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "tags failed")
+		return
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tags": tags})
 }
 
 func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
@@ -204,14 +217,23 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	err := s.store.UpdateAgentName(r.Context(), chi.URLParam(r, "id"), req.Name)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "agent not found")
-		return
+	agentID := chi.URLParam(r, "id")
+	if req.Name != "" {
+		err := s.store.UpdateAgentName(r.Context(), agentID, req.Name)
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if req.Tags != nil {
+		if err := s.store.UpdateAgentTags(r.Context(), agentID, *req.Tags); err != nil {
+			writeError(w, http.StatusInternalServerError, "tags update failed")
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

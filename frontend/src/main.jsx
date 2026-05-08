@@ -154,9 +154,23 @@ function Dashboard({ api }) {
 function Agents({ api, onSelect }) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const { data, loading, reload, lastUpdated } = useLoad(() => api.get(`/api/agents?q=${encodeURIComponent(query)}`), [query], REFRESH_MS);
+  const [tagFilter, setTagFilter] = useState('');
+  const [osFilter, setOsFilter] = useState('');
+  const { data: tagsData } = useLoad(() => api.get('/api/tags'), [], 0);
+  const availableTags = tagsData?.tags || [];
+  const { data, loading, reload, lastUpdated } = useLoad(() => {
+    let url = `/api/agents?q=${encodeURIComponent(query)}`;
+    if (tagFilter) url += `&tag=${encodeURIComponent(tagFilter)}`;
+    return api.get(url);
+  }, [query, tagFilter], REFRESH_MS);
   const agents = data?.agents || [];
-  const filtered = statusFilter === 'all' ? agents : agents.filter((agent) => agent.status === statusFilter);
+  const osOptions = useMemo(() => {
+    const seen = new Set();
+    agents.forEach((a) => { if (a.os) seen.add(a.os.split(' ')[0]); });
+    return Array.from(seen).sort();
+  }, [agents]);
+  const filtered = (statusFilter === 'all' ? agents : agents.filter((agent) => agent.status === statusFilter))
+    .filter((a) => !osFilter || (a.os && a.os.toLowerCase().includes(osFilter.toLowerCase())));
   const counts = agents.reduce((acc, agent) => ({ ...acc, [agent.status]: (acc[agent.status] || 0) + 1 }), {});
   return (
     <section>
@@ -169,11 +183,25 @@ function Agents({ api, onSelect }) {
               {status === 'all' ? 'Todos' : status}<span>{status === 'all' ? agents.length : counts[status] || 0}</span>
             </button>
           ))}
+          {availableTags.length > 0 && (
+            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}
+              style={{marginLeft:'8px',background:'#1e293b',color:'inherit',border:'1px solid #334155',borderRadius:'6px',padding:'4px 8px',fontSize:'13px',cursor:'pointer'}}>
+              <option value="">Todos los grupos</option>
+              {availableTags.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          )}
+          {osOptions.length > 1 && (
+            <select value={osFilter} onChange={(e) => setOsFilter(e.target.value)}
+              style={{marginLeft:'8px',background:'#1e293b',color:'inherit',border:'1px solid #334155',borderRadius:'6px',padding:'4px 8px',fontSize:'13px',cursor:'pointer'}}>
+              <option value="">Todos los OS</option>
+              {osOptions.map((os) => <option key={os} value={os}>{os}</option>)}
+            </select>
+          )}
         </div>
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Ultima metrica</th><th>Heartbeat</th></tr></thead>
+          <thead><tr><th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Grupos</th><th>Ultima metrica</th><th>Heartbeat</th></tr></thead>
           <tbody>
             {filtered.map((agent) => (
               <tr key={agent.id} onClick={() => onSelect(agent.id)}>
@@ -184,15 +212,67 @@ function Agents({ api, onSelect }) {
                 <td>{percent(agent.memory_used_percent)}</td>
                 <td>{agent.disk_count ?? 0}</td>
                 <td>{agent.active_alerts ?? 0}</td>
+                <td>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'3px'}}>
+                    {(agent.tags || []).map((t) => (
+                      <span key={t} style={{background:'#1d4ed8',color:'#bfdbfe',borderRadius:'3px',padding:'1px 5px',fontSize:'11px',whiteSpace:'nowrap'}}>{t}</span>
+                    ))}
+                  </div>
+                </td>
                 <td>{date(agent.last_metric_at)}</td>
                 <td>{date(agent.last_seen_at)}</td>
               </tr>
             ))}
-            {!filtered.length && <tr><td colSpan="9" className="empty">Sin equipos registrados</td></tr>}
+            {!filtered.length && <tr><td colSpan="10" className="empty">Sin equipos registrados</td></tr>}
           </tbody>
         </table>
       </div>
     </section>
+  );
+}
+
+function AgentTags({ api, agentId, initialTags, onUpdate }) {
+  const [tags, setTags] = useState(initialTags || []);
+  const [input, setInput] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setTags(initialTags || []);
+  }, [JSON.stringify(initialTags)]);
+
+  const addTag = async () => {
+    const tag = input.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!tag || tags.includes(tag)) { setInput(''); return; }
+    const next = [...tags, tag];
+    setSaving(true);
+    try {
+      await api.patch(`/api/agents/${agentId}`, { tags: next });
+      setTags(next);
+      if (onUpdate) onUpdate(next);
+    } finally { setSaving(false); setInput(''); }
+  };
+
+  const removeTag = async (t) => {
+    const next = tags.filter((x) => x !== t);
+    await api.patch(`/api/agents/${agentId}`, { tags: next });
+    setTags(next);
+    if (onUpdate) onUpdate(next);
+  };
+
+  return (
+    <div style={{display:'flex',flexWrap:'wrap',gap:'6px',alignItems:'center',margin:'8px 0'}}>
+      {tags.map((t) => (
+        <span key={t} style={{background:'#1d4ed8',color:'#bfdbfe',borderRadius:'4px',padding:'2px 8px',fontSize:'12px',cursor:'pointer',userSelect:'none'}}
+          onClick={() => removeTag(t)} title="Click para eliminar">
+          {t} &times;
+        </span>
+      ))}
+      <input value={input} onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+        placeholder="+ tag" disabled={saving}
+        style={{border:'1px solid #4b5563',background:'transparent',color:'inherit',
+          borderRadius:'4px',padding:'2px 8px',fontSize:'12px',width:'80px',outline:'none'}} />
+    </div>
   );
 }
 
@@ -231,6 +311,7 @@ function AgentDetail({ api, agentId, onBack }) {
       {agent && (
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span></div>
+          <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
           <div className="tab-row">
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>

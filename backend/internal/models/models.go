@@ -28,7 +28,8 @@ type EnrollmentTokenRequest struct {
 }
 
 type AgentUpdateRequest struct {
-	Name string `json:"name"`
+	Name string   `json:"name"`
+	Tags *[]string `json:"tags,omitempty"`
 }
 
 type AlertRule struct {
@@ -185,11 +186,12 @@ type Agent struct {
 	Status        string     `json:"status"`
 	LastSeenAt    *time.Time `json:"last_seen_at"`
 	CreatedAt     time.Time  `json:"created_at"`
-	CPUPercent    *float64    `json:"cpu_percent,omitempty"`
-	MemoryPercent *float64    `json:"memory_used_percent,omitempty"`
-	LastMetricAt  *time.Time  `json:"last_metric_at,omitempty"`
-	ActiveAlerts  int         `json:"active_alerts"`
-	DiskCount     int         `json:"disk_count"`
+	CPUPercent    *float64   `json:"cpu_percent,omitempty"`
+	MemoryPercent *float64   `json:"memory_used_percent,omitempty"`
+	LastMetricAt  *time.Time `json:"last_metric_at,omitempty"`
+	ActiveAlerts  int        `json:"active_alerts"`
+	DiskCount     int        `json:"disk_count"`
+	Tags          []string   `json:"tags"`
 }
 
 type Alert struct {

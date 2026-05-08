@@ -395,7 +395,11 @@ func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (
 	}, nil
 }
 
-func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search string) ([]models.Agent, error) {
+func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search string, tagFilter ...string) ([]models.Agent, error) {
+	tag := ""
+	if len(tagFilter) > 0 {
+		tag = tagFilter[0]
+	}
 	rows, err := s.pool.Query(ctx, `
 		WITH latest AS (
 		  SELECT DISTINCT ON (agent_id) agent_id, captured_at, cpu_percent, memory_used_percent
@@ -419,14 +423,15 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		       CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
 		            THEN 'offline' ELSE a.status END AS effective_status,
 		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent, l.captured_at,
-		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0)
+		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}')
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
 		LEFT JOIN alert_counts ac ON ac.agent_id = a.id
 		LEFT JOIN disk_counts dc ON dc.agent_id = a.id
-		WHERE $2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%'
+		WHERE ($2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%')
+		  AND ($3 = '' OR $3 = ANY(a.tags))
 		ORDER BY a.last_seen_at DESC NULLS LAST, a.name
-	`, offlineAfterSeconds, search)
+	`, offlineAfterSeconds, search, tag)
 	if err != nil {
 		return nil, err
 	}
@@ -436,8 +441,11 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 	for rows.Next() {
 		var agent models.Agent
 		var uptime int64
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags); err != nil {
 			return nil, err
+		}
+		if agent.Tags == nil {
+			agent.Tags = []string{}
 		}
 		agent.UptimeSeconds = uint64(uptime)
 		agents = append(agents, agent)

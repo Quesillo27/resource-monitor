@@ -267,6 +267,8 @@ func (s *Store) EnsureV31Schema(ctx context.Context) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS temperature_samples_agent_idx ON temperature_samples(agent_id, captured_at DESC)`,
 		`ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS gateway_latency_ms DOUBLE PRECISION`,
+		`ALTER TABLE agents ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'`,
+		`CREATE INDEX IF NOT EXISTS agents_tags_gin ON agents USING gin(tags)`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {
