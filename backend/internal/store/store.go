@@ -8,8 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
-	"net/url"
 	"strings"
 	"time"
 
@@ -140,48 +138,6 @@ func (s *Store) AuthenticateUser(ctx context.Context, username, password string)
 		return nil, ErrUnauthorized
 	}
 	return &user, nil
-}
-
-func (s *Store) CreateEnrollmentToken(ctx context.Context, userID, name string, ttlHours int, serverURL, downloadURL, agentName, installStyle, releaseVersion string) (*EnrollmentTokenResult, error) {
-	if ttlHours <= 0 {
-		ttlHours = 24
-	}
-	if name == "" {
-		name = "agent enrollment"
-	}
-	token, err := randomToken(32)
-	if err != nil {
-		return nil, err
-	}
-	expiresAt := time.Now().UTC().Add(time.Duration(ttlHours) * time.Hour)
-	var id string
-	err = s.pool.QueryRow(ctx, `
-		INSERT INTO enrollment_tokens (token_hash, name, expires_at, created_by)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id::text
-	`, hashSecret(token), name, expiresAt, userID).Scan(&id)
-	if err != nil {
-		return nil, err
-	}
-
-	if releaseVersion == "" {
-		releaseVersion = "latest"
-	}
-	linuxCommand := installCommand(serverURL, downloadURL, token, agentName, "linux", releaseVersion)
-	windowsCommand := installCommand(serverURL, downloadURL, token, agentName, "windows", releaseVersion)
-	resultCommand := linuxCommand
-	if installStyle == "windows" {
-		resultCommand = windowsCommand
-	}
-	return &EnrollmentTokenResult{
-		ID:                    id,
-		Token:                 token,
-		ExpiresAt:             expiresAt.Format(time.RFC3339),
-		InstallCommand:        resultCommand,
-		LinuxInstallCommand:   linuxCommand,
-		WindowsInstallCommand: windowsCommand,
-		ReleaseVersion:        releaseVersion,
-	}, nil
 }
 
 func (s *Store) RegisterAgent(ctx context.Context, req models.AgentRegisterRequest) (*models.AgentAuthResponse, error) {
@@ -870,39 +826,3 @@ func hashSecret(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func installCommand(serverURL, downloadURL, token, agentName, style, releaseVersion string) string {
-	if serverURL == "" {
-		serverURL = "https://monitor.example.com"
-	}
-	if releaseVersion == "" {
-		releaseVersion = "latest"
-	}
-	nameArg := ""
-	if agentName != "" {
-		nameArg = " --name \"" + agentName + "\""
-	}
-	localBase := deriveDownloadBase(serverURL, downloadURL)
-	if style == "windows" {
-		return "iwr " + localBase + "/install-agent.ps1 -UseBasicParsing -OutFile install-agent.ps1; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl " + serverURL + " -EnrollmentToken " + token + strings.ReplaceAll(nameArg, " --name ", " -Name ") + " -AgentUrl " + localBase + "/resource-monitor-agent-windows-amd64.exe"
-	}
-	return "curl -fsSL " + localBase + "/install-agent.sh | sudo bash -s -- --server-url " + serverURL + " --enrollment-token " + token + nameArg + " --agent-url " + localBase + "/resource-monitor-agent-linux-amd64"
-}
-
-func deriveDownloadBase(serverURL, downloadURL string) string {
-	if downloadURL != "" {
-		return strings.TrimRight(downloadURL, "/")
-	}
-	parsed, err := url.Parse(serverURL)
-	if err != nil || parsed.Host == "" {
-		return "http://localhost:3000/downloads"
-	}
-	host, _, err := net.SplitHostPort(parsed.Host)
-	if err != nil {
-		host = parsed.Host
-	}
-	parsed.Host = net.JoinHostPort(host, "3000")
-	parsed.Path = "/downloads"
-	parsed.RawQuery = ""
-	parsed.Fragment = ""
-	return strings.TrimRight(parsed.String(), "/")
-}

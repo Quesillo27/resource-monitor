@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	"resource-monitor/agent/internal/collector"
 )
+
+var ErrUnauthorized = errors.New("agent credential rejected by server (401) — re-run install with --enrollment-token")
 
 type Client struct {
 	baseURL    string
@@ -81,6 +84,9 @@ func (c *Client) post(ctx context.Context, path string, payload any, auth bool, 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized {
+		return ErrUnauthorized
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		bytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		message := strings.TrimSpace(string(bytes))

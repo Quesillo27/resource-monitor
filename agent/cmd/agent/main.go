@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -305,6 +306,10 @@ func sendOnceWithRetry(ctx context.Context, cfg config.Config) {
 			}
 		}
 		if err := sendOnce(ctx, cfg); err != nil {
+			if errors.Is(err, client.ErrUnauthorized) {
+				log.Printf("AUTH ERROR: %v — agent will keep retrying every %ds; reinstall on this host with a new --enrollment-token to recover", err, cfg.IntervalSeconds)
+				return
+			}
 			log.Printf("send metrics failed attempt=%d/%d: %v", attempt+1, len(delays), err)
 			continue
 		}

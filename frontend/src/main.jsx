@@ -55,6 +55,7 @@ function Shell({ token, view, setView, onLogout }) {
     ['agents', Server, 'Equipos'],
     ['enroll', KeyRound, 'Alta agente'],
     ['alerts', ShieldAlert, 'Alertas'],
+    ['settings', Settings, 'Configuración'],
   ];
   return (
     <div className="app-shell">
@@ -80,6 +81,7 @@ function Shell({ token, view, setView, onLogout }) {
         {view === 'agents' && (selectedAgent ? <AgentDetail api={api} agentId={selectedAgent} onBack={() => setSelectedAgent(null)} /> : <Agents api={api} onSelect={setSelectedAgent} />)}
         {view === 'enroll' && <Enrollment api={api} />}
         {view === 'alerts' && <AlertsCenter api={api} />}
+        {view === 'settings' && <SettingsPage api={api} />}
       </main>
     </div>
   );
@@ -201,19 +203,19 @@ function AgentRow({ agent, api, onSelect }) {
     <tr onMouseEnter={load} className="agent-row" onClick={() => onSelect(agent.id)}>
       <td className="agent-cell-name"><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
       <td><Status status={agent.status} /></td>
-      <td className="agent-cell-os">{agent.os}</td>
+      <td className="agent-cell-os hide-md">{agent.os}</td>
       <td>{percent(agent.cpu_percent)}</td>
       <td>{percent(agent.memory_used_percent)}</td>
-      <td>{agent.disk_count ?? 0}</td>
+      <td className="hide-md">{agent.disk_count ?? 0}</td>
       <td>{alerts > 0 ? <span className="alert-count">{alerts}</span> : <span className="text-muted">0</span>}</td>
-      <td>
+      <td className="hide-lg">
         <div className="tag-cell">
           {(agent.tags || []).map((t) => <span key={t} className="agent-tag">{t}</span>)}
         </div>
       </td>
-      <td className="text-muted">{date(agent.last_metric_at)}</td>
-      <td className="text-muted">{date(agent.last_seen_at)}</td>
-      <td className="agent-cell-spark"><Sparkline points={sparkPoints} color={sparkColor} /></td>
+      <td className="text-muted hide-md">{date(agent.last_metric_at)}</td>
+      <td className="text-muted hide-lg">{date(agent.last_seen_at)}</td>
+      <td className="agent-cell-spark hide-md"><Sparkline points={sparkPoints} color={sparkColor} /></td>
     </tr>
   );
 }
@@ -267,7 +269,7 @@ function Agents({ api, onSelect }) {
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Grupos</th><th>Ultima metrica</th><th>Heartbeat</th><th>CPU 24h</th></tr></thead>
+          <thead><tr><th>Equipo</th><th>Estado</th><th className="hide-md">OS</th><th>CPU</th><th>RAM</th><th className="hide-md">Discos</th><th>Alertas</th><th className="hide-lg">Grupos</th><th className="hide-md">Ultima metrica</th><th className="hide-lg">Heartbeat</th><th className="hide-md">CPU 24h</th></tr></thead>
           <tbody>
             {filtered.map((agent) => (
               <AgentRow key={agent.id} agent={agent} api={api} onSelect={onSelect} />
@@ -650,6 +652,193 @@ function timeAgo(dateStr) {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `hace ${hrs}h`;
   return `hace ${Math.floor(hrs / 24)}d`;
+}
+
+function SettingsPage({ api }) {
+  const [tab, setTab] = useState('users');
+  return (
+    <section>
+      <Header title="Configuración" />
+      <div className="tab-row">
+        <button className={tab === 'users' ? 'selected' : ''} onClick={() => setTab('users')}>Usuarios</button>
+        <button className={tab === 'system' ? 'selected' : ''} onClick={() => setTab('system')}>Sistema</button>
+      </div>
+      {tab === 'users' && <UsersPanel api={api} />}
+      {tab === 'system' && <SystemPanel api={api} />}
+    </section>
+  );
+}
+
+function UsersPanel({ api }) {
+  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/users'), [], 0);
+  const [draft, setDraft] = useState({ username: '', password: '', role: 'operator', active: true });
+  const [editing, setEditing] = useState(null);
+  const [pwModal, setPwModal] = useState(null);
+  const [message, setMessage] = useState(null);
+
+  const users = data?.users || [];
+  const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
+
+  async function createUser() {
+    if (!draft.username.trim() || !draft.password.trim()) {
+      setMessage({ type: 'err', text: 'Usuario y contraseña son obligatorios' });
+      return;
+    }
+    if (draft.password.length < 8) {
+      setMessage({ type: 'err', text: 'La contraseña debe tener al menos 8 caracteres' });
+      return;
+    }
+    try {
+      await api.post('/api/users', draft);
+      setDraft({ username: '', password: '', role: 'operator', active: true });
+      setMessage({ type: 'ok', text: 'Usuario creado' });
+      reload();
+    } catch (e) {
+      setMessage({ type: 'err', text: e.message });
+    }
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    try {
+      await api.patch(`/api/users/${editing.id}`, { username: editing.username, role: editing.role, active: editing.active });
+      setEditing(null);
+      setMessage({ type: 'ok', text: 'Usuario actualizado' });
+      reload();
+    } catch (e) {
+      setMessage({ type: 'err', text: e.message });
+    }
+  }
+
+  async function savePassword() {
+    if (!pwModal || !pwModal.password) return;
+    if (pwModal.password.length < 8) {
+      setMessage({ type: 'err', text: 'La contraseña debe tener al menos 8 caracteres' });
+      return;
+    }
+    try {
+      await api.post(`/api/users/${pwModal.id}/password`, { password: pwModal.password });
+      setPwModal(null);
+      setMessage({ type: 'ok', text: 'Contraseña actualizada' });
+    } catch (e) {
+      setMessage({ type: 'err', text: e.message });
+    }
+  }
+
+  return (
+    <Panel title="Usuarios y permisos" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
+      <p className="panel-hint">Roles: <strong>admin</strong> gestiona todo, <strong>operator</strong> opera reglas y agentes, <strong>viewer</strong> solo lectura.</p>
+
+      <div className="user-create">
+        <input placeholder="Usuario" value={draft.username} onChange={(e) => setField('username', e.target.value)} />
+        <input type="password" placeholder="Contraseña (≥ 8 caracteres)" value={draft.password} onChange={(e) => setField('password', e.target.value)} />
+        <select value={draft.role} onChange={(e) => setField('role', e.target.value)}>
+          <option value="admin">admin</option>
+          <option value="operator">operator</option>
+          <option value="viewer">viewer</option>
+        </select>
+        <label className="user-active-toggle"><input type="checkbox" checked={draft.active} onChange={(e) => setField('active', e.target.checked)} /> Activo</label>
+        <IconButton icon={Save} label="Crear usuario" onClick={createUser} />
+      </div>
+
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Actualizado</th><th></th></tr></thead>
+          <tbody>
+            {users.map((u) => (
+              <tr key={u.id}>
+                <td><strong>{u.username}</strong></td>
+                <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
+                <td>{u.active ? <span className="status online">activo</span> : <span className="status offline">inactivo</span>}</td>
+                <td className="text-muted">{date(u.created_at)}</td>
+                <td className="text-muted">{date(u.updated_at)}</td>
+                <td>
+                  <div className="actions">
+                    <IconButton icon={Edit3} label="Editar" onClick={() => setEditing({ ...u })} />
+                    <IconButton icon={KeyRound} label="Cambiar contraseña" onClick={() => setPwModal({ id: u.id, username: u.username, password: '' })} />
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && <tr><td colSpan="6" className="empty">Sin usuarios registrados</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {message && <p className={`status-msg ${message.type}`}>{message.text}</p>}
+
+      {editing && (
+        <Modal title={`Editar ${editing.username}`} onClose={() => setEditing(null)}>
+          <div className="form-grid">
+            <label>Usuario<input value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} /></label>
+            <label>Rol
+              <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}>
+                <option value="admin">admin</option>
+                <option value="operator">operator</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </label>
+            <label className="user-active-toggle"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Activo</label>
+          </div>
+          <div className="actions modal-actions">
+            <button onClick={() => setEditing(null)}>Cancelar</button>
+            <button className="primary" onClick={saveEdit}>Guardar</button>
+          </div>
+        </Modal>
+      )}
+
+      {pwModal && (
+        <Modal title={`Cambiar contraseña — ${pwModal.username}`} onClose={() => setPwModal(null)}>
+          <label>Nueva contraseña <span className="field-hint">mínimo 8 caracteres</span>
+            <input type="password" autoFocus value={pwModal.password} onChange={(e) => setPwModal({ ...pwModal, password: e.target.value })} />
+          </label>
+          <div className="actions modal-actions">
+            <button onClick={() => setPwModal(null)}>Cancelar</button>
+            <button className="primary" onClick={savePassword}>Actualizar</button>
+          </div>
+        </Modal>
+      )}
+    </Panel>
+  );
+}
+
+function SystemPanel({ api }) {
+  const { data: version } = useLoad(() => api.get('/api/agent/version').catch(() => ({})), [], 0);
+  return (
+    <Panel title="Información del sistema">
+      <div className="system-grid">
+        <div className="system-card">
+          <span className="system-label">Versión del agente</span>
+          <strong>{version?.version || 'desconocida'}</strong>
+          <small>Versión disponible para agentes nuevos</small>
+        </div>
+        <div className="system-card">
+          <span className="system-label">Canales de notificación</span>
+          <strong>SMTP y Telegram</strong>
+          <small>Configura desde la pestaña Alertas → SMTP / Telegram</small>
+        </div>
+        <div className="system-card">
+          <span className="system-label">Reglas de alertas</span>
+          <strong>Globales y por equipo</strong>
+          <small>Configura desde Alertas → Reglas (globales) o desde el detalle del equipo</small>
+        </div>
+      </div>
+    </Panel>
+  );
+}
+
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h3>{title}</h3>
+          <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </header>
+        <div className="modal-body">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 function AlertsCenter({ api }) {
