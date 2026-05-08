@@ -133,6 +133,7 @@ type MetricsRequest struct {
 	Networks          []NetMetric  `json:"networks,omitempty"`
 	Processes         []ProcMetric `json:"processes,omitempty"`
 	Services          []SvcMetric  `json:"services,omitempty"`
+	Temperatures      []TempMetric `json:"temperatures,omitempty"`
 }
 
 type DiskMetric struct {
@@ -166,6 +167,11 @@ type ProcMetric struct {
 type SvcMetric struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+}
+
+type TempMetric struct {
+	SensorKey    string  `json:"sensor_key"`
+	TemperatureC float64 `json:"temperature_c"`
 }
 
 type Agent struct {

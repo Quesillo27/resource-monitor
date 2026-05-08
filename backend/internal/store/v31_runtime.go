@@ -74,6 +74,16 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 			return err
 		}
 	}
+	for _, temp := range req.Temperatures {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO temperature_samples
+				(agent_id, captured_at, sensor_key, temperature_c)
+			VALUES ($1, $2, $3, $4)
+		`, agentID, sampleAt, temp.SensorKey, temp.TemperatureC)
+		if err != nil {
+			return err
+		}
+	}
 
 	status, activeKeys, err := s.evaluateRuleAlerts(ctx, tx, agentID, sampleID, sampleAt, req)
 	if err != nil {
@@ -246,8 +256,30 @@ func (s *Store) SafeAgentNameV31(ctx context.Context, id string) (string, error)
 	return name, err
 }
 
+func (s *Store) EnsureV31Schema(ctx context.Context) error {
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS temperature_samples (
+			id BIGSERIAL PRIMARY KEY,
+			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			captured_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+			sensor_key TEXT NOT NULL,
+			temperature_c DOUBLE PRECISION NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS temperature_samples_agent_idx ON temperature_samples(agent_id, captured_at DESC)`,
+	}
+	for _, stmt := range statements {
+		if _, err := s.pool.Exec(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Store) ensureAlertRuntimeSchemas(ctx context.Context) error {
 	if err := s.EnsureV3Schema(ctx); err != nil {
+		return err
+	}
+	if err := s.EnsureV31Schema(ctx); err != nil {
 		return err
 	}
 	if err := s.ensureAlertRulesSchema(ctx); err != nil {

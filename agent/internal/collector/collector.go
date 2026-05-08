@@ -13,6 +13,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	gnet "github.com/shirou/gopsutil/v4/net"
 	"github.com/shirou/gopsutil/v4/process"
+	"github.com/shirou/gopsutil/v4/sensors"
 )
 
 type Host struct {
@@ -35,6 +36,7 @@ type Metrics struct {
 	Networks          []NetMetric  `json:"networks,omitempty"`
 	Processes         []ProcMetric `json:"processes,omitempty"`
 	Services          []SvcMetric  `json:"services,omitempty"`
+	Temperatures      []TempMetric `json:"temperatures,omitempty"`
 }
 
 type DiskMetric struct {
@@ -64,6 +66,11 @@ type ProcMetric struct {
 type SvcMetric struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
+}
+
+type TempMetric struct {
+	SensorKey     string  `json:"sensor_key"`
+	TemperatureC  float64 `json:"temperature_c"`
 }
 
 type SoftwareItem struct {
@@ -127,10 +134,15 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		SwapUsedPercent:   swapPercent,
 		Disks:             disks,
 	}
-	if profile == "" || profile == "balanced" {
+	if profile == "balanced" || profile == "" {
 		metrics.Networks = collectNetworks(ctx)
 		metrics.Processes = collectTopProcesses(ctx, 10)
 		metrics.Services = collectServices(ctx, serviceChecks)
+	} else if profile == "full" {
+		metrics.Networks = collectNetworks(ctx)
+		metrics.Processes = collectTopProcesses(ctx, 20)
+		metrics.Services = collectServices(ctx, serviceChecks)
+		metrics.Temperatures = collectTemperatures(ctx)
 	}
 	return metrics, nil
 }
@@ -255,6 +267,26 @@ func collectServices(ctx context.Context, checks []string) []SvcMetric {
 			status = "running"
 		}
 		result = append(result, SvcMetric{Name: check, Status: status})
+	}
+	return result
+}
+
+func collectTemperatures(ctx context.Context) []TempMetric {
+	temps, err := sensors.TemperaturesWithContext(ctx)
+	if err != nil || len(temps) == 0 {
+		return nil
+	}
+	result := []TempMetric{}
+	for _, t := range temps {
+		if t.Temperature > 0 {
+			result = append(result, TempMetric{
+				SensorKey:    t.SensorKey,
+				TemperatureC: t.Temperature,
+			})
+		}
+	}
+	if len(result) == 0 {
+		return nil
 	}
 	return result
 }

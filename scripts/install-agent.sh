@@ -42,9 +42,22 @@ if [[ -z "$ENROLLMENT_TOKEN" && ! -f "$CONFIG_PATH" ]]; then
 fi
 
 ARCH="$(uname -m)"
-case "$ARCH" in
-  x86_64|amd64) ASSET="resource-monitor-agent-linux-amd64" ;;
-  *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+OS="$(uname -s)"
+case "$OS" in
+  Darwin)
+    case "$ARCH" in
+      x86_64|amd64) ASSET="resource-monitor-agent-darwin-amd64" ;;
+      arm64)        ASSET="resource-monitor-agent-darwin-arm64" ;;
+      *) echo "Unsupported macOS architecture: $ARCH" >&2; exit 1 ;;
+    esac
+    ;;
+  Linux)
+    case "$ARCH" in
+      x86_64|amd64) ASSET="resource-monitor-agent-linux-amd64" ;;
+      *) echo "Unsupported Linux architecture: $ARCH" >&2; exit 1 ;;
+    esac
+    ;;
+  *) echo "Unsupported OS: $OS" >&2; exit 1 ;;
 esac
 
 if [[ -n "$DOWNLOAD_URL_BASE" ]]; then
@@ -60,7 +73,9 @@ INSTALL_PATH="/usr/local/bin/resource-monitor-agent"
 cleanup() { rm -f "$TMP_BIN"; }
 trap cleanup EXIT
 
-systemctl stop resource-monitor-agent 2>/dev/null || true
+if [[ "$OS" == "Linux" ]]; then
+  systemctl stop resource-monitor-agent 2>/dev/null || true
+fi
 
 DOWNLOAD_ASSET_URL="${BASE_URL}/${ASSET}"
 if [[ -n "$AGENT_URL" ]]; then
@@ -106,11 +121,15 @@ fi
 echo "Installing or updating resource-monitor-agent..."
 "$INSTALL_PATH" "${ARGS[@]}"
 
-systemctl daemon-reload
-systemctl enable resource-monitor-agent
-systemctl restart resource-monitor-agent
+if [[ "$OS" == "Linux" ]]; then
+  systemctl daemon-reload
+  systemctl enable resource-monitor-agent
+  systemctl restart resource-monitor-agent
+fi
 
 echo "Running agent doctor..."
 "$INSTALL_PATH" doctor --config "$CONFIG_PATH"
-systemctl --no-pager status resource-monitor-agent || true
+if [[ "$OS" == "Linux" ]]; then
+  systemctl --no-pager status resource-monitor-agent || true
+fi
 echo "Resource Monitor agent installation/update complete."

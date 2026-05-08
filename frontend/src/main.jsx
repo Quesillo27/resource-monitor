@@ -409,6 +409,7 @@ function Enrollment({ api }) {
                     <select value={profile} onChange={(e) => setProfile(e.target.value)}>
                       <option value="balanced">Balanceado — CPU, RAM, disco, red, procesos</option>
                       <option value="minimal">Mínimo — solo CPU, RAM y disco</option>
+                      <option value="full">Full — todo + temperaturas (20 procesos)</option>
                     </select>
                   </label>
                   <label>Intervalo (segundos)
