@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Activity,
@@ -151,6 +151,71 @@ function Dashboard({ api }) {
   );
 }
 
+// ── Sparkline helpers ────────────────────────────────────────────────────────
+function Sparkline({ points, color = '#3b82f6', width = 80, height = 28 }) {
+  if (!points || points.length < 2) return <span style={{ color: '#6b7280', fontSize: '11px' }}>—</span>;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const range = max - min || 1;
+  const pts = points.map((v, i) => {
+    const x = (i / (points.length - 1)) * width;
+    const y = height - ((v - min) / range) * height;
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+const sparklineCache = {};
+
+function useSparkline(agentId, api) {
+  const [data, setData] = useState(sparklineCache[agentId] || null);
+  const load = useCallback(async () => {
+    if (sparklineCache[agentId]) { setData(sparklineCache[agentId]); return; }
+    try {
+      const res = await api.get(`/api/agents/${agentId}/history?range=24h`);
+      const points = (res.metrics || []).map((m) => m.cpu_percent || 0);
+      const step = Math.max(1, Math.floor(points.length / 40));
+      const sampled = points.filter((_, i) => i % step === 0);
+      sparklineCache[agentId] = sampled;
+      setData(sampled);
+    } catch { /* silencioso */ }
+  }, [agentId, api]);
+  return { data, load };
+}
+
+function AgentRow({ agent, api, onSelect }) {
+  const { data: sparkPoints, load } = useSparkline(agent.id, api);
+  const sparkColor = agent.status === 'critical' ? '#ef4444' : agent.status === 'warning' ? '#f59e0b' : '#3b82f6';
+  return (
+    <tr onMouseEnter={load} style={{ cursor: 'pointer' }} onClick={() => onSelect(agent.id)}>
+      <td><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
+      <td><Status status={agent.status} /></td>
+      <td>{agent.os}</td>
+      <td>{percent(agent.cpu_percent)}</td>
+      <td>{percent(agent.memory_used_percent)}</td>
+      <td>{agent.disk_count ?? 0}</td>
+      <td>{agent.active_alerts ?? 0}</td>
+      <td>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+          {(agent.tags || []).map((t) => (
+            <span key={t} style={{ background: '#1d4ed8', color: '#bfdbfe', borderRadius: '3px', padding: '1px 5px', fontSize: '11px', whiteSpace: 'nowrap' }}>{t}</span>
+          ))}
+        </div>
+      </td>
+      <td>{date(agent.last_metric_at)}</td>
+      <td>{date(agent.last_seen_at)}</td>
+      <td style={{ width: 90 }}>
+        <Sparkline points={sparkPoints} color={sparkColor} />
+      </td>
+    </tr>
+  );
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function Agents({ api, onSelect }) {
   const [query, setQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -201,29 +266,12 @@ function Agents({ api, onSelect }) {
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Grupos</th><th>Ultima metrica</th><th>Heartbeat</th></tr></thead>
+          <thead><tr><th>Equipo</th><th>Estado</th><th>OS</th><th>CPU</th><th>RAM</th><th>Discos</th><th>Alertas</th><th>Grupos</th><th>Ultima metrica</th><th>Heartbeat</th><th>CPU 24h</th></tr></thead>
           <tbody>
             {filtered.map((agent) => (
-              <tr key={agent.id} onClick={() => onSelect(agent.id)}>
-                <td><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
-                <td><Status status={agent.status} /></td>
-                <td>{agent.os}</td>
-                <td>{percent(agent.cpu_percent)}</td>
-                <td>{percent(agent.memory_used_percent)}</td>
-                <td>{agent.disk_count ?? 0}</td>
-                <td>{agent.active_alerts ?? 0}</td>
-                <td>
-                  <div style={{display:'flex',flexWrap:'wrap',gap:'3px'}}>
-                    {(agent.tags || []).map((t) => (
-                      <span key={t} style={{background:'#1d4ed8',color:'#bfdbfe',borderRadius:'3px',padding:'1px 5px',fontSize:'11px',whiteSpace:'nowrap'}}>{t}</span>
-                    ))}
-                  </div>
-                </td>
-                <td>{date(agent.last_metric_at)}</td>
-                <td>{date(agent.last_seen_at)}</td>
-              </tr>
+              <AgentRow key={agent.id} agent={agent} api={api} onSelect={onSelect} />
             ))}
-            {!filtered.length && <tr><td colSpan="10" className="empty">Sin equipos registrados</td></tr>}
+            {!filtered.length && <tr><td colSpan="11" className="empty">Sin equipos registrados</td></tr>}
           </tbody>
         </table>
       </div>
