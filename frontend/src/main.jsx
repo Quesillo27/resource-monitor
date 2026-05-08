@@ -377,7 +377,7 @@ function Enrollment({ api }) {
           <div className="check-list"><span><CheckCircle2 size={18} /> Descarga desde LAN</span><span><CheckCircle2 size={18} /> Registro con token unico</span><span><CheckCircle2 size={18} /> Servicio activo</span><span><CheckCircle2 size={18} /> Primera metrica en menos de 60s</span></div>
         </Panel>
       </div>
-      {result && <div className="install-result"><div className="install-meta"><strong>Token valido hasta {date(result.expires_at)}</strong><span>{result.token}</span></div><CommandBlock title="Linux systemd" command={result.linux_install_command || result.install_command} /><CommandBlock title="Windows PowerShell admin" command={result.windows_install_command || result.install_command} /></div>}
+      {result && <EnrollResult result={result} platform={platform} />}
     </section>
   );
 }
@@ -666,6 +666,28 @@ function rate(value) {
 
 function WizardStep({ index, title, children }) {
   return <div className="wizard-step"><strong>{index}</strong><div><h2>{title}</h2>{children}</div></div>;
+}
+
+function EnrollResult({ result, platform }) {
+  const [showOther, setShowOther] = useState(false);
+  const isLinux = platform === 'linux';
+  const primaryTitle = isLinux ? 'Linux systemd' : 'Windows PowerShell admin';
+  const primaryCmd = isLinux ? (result.linux_install_command || result.install_command) : (result.windows_install_command || result.install_command);
+  const otherTitle = isLinux ? 'Windows PowerShell admin' : 'Linux systemd';
+  const otherCmd = isLinux ? (result.windows_install_command || result.install_command) : (result.linux_install_command || result.install_command);
+  return (
+    <div className="install-result">
+      <div className="install-meta">
+        <strong>Token válido hasta {date(result.expires_at)}</strong>
+        <span className="token-value">{result.token}</span>
+      </div>
+      <CommandBlock title={primaryTitle} command={primaryCmd} />
+      <button type="button" className="link-btn" onClick={() => setShowOther(!showOther)}>
+        {showOther ? '▲ Ocultar' : '▼ Ver comando ' + otherTitle}
+      </button>
+      {showOther && <CommandBlock title={otherTitle} command={otherCmd} />}
+    </div>
+  );
 }
 
 function CommandBlock({ title, command }) {

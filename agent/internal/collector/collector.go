@@ -118,7 +118,7 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 	}
 	if profile == "" || profile == "balanced" {
 		metrics.Networks = collectNetworks(ctx)
-		metrics.Processes = collectTopProcesses(ctx, 5)
+		metrics.Processes = collectTopProcesses(ctx, 10)
 		metrics.Services = collectServices(ctx, serviceChecks)
 	}
 	return metrics, nil
@@ -189,6 +189,7 @@ func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 	if err != nil {
 		return nil
 	}
+	numCPU := float64(runtime.NumCPU())
 	result := []ProcMetric{}
 	for _, proc := range procs {
 		name, err := proc.NameWithContext(ctx)
@@ -199,6 +200,10 @@ func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 		memPercent, _ := proc.MemoryPercentWithContext(ctx)
 		if cpuPercent <= 0 && memPercent <= 0 {
 			continue
+		}
+		// Normalize CPU to system-relative % (gopsutil returns per-core %)
+		if numCPU > 1 {
+			cpuPercent = cpuPercent / numCPU
 		}
 		result = append(result, ProcMetric{
 			PID:           proc.Pid,

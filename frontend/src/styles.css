@@ -930,13 +930,24 @@ label span {
 
 .install-meta strong { font-size: 14px; color: var(--text-primary); }
 
-.install-meta span {
+.install-meta span, .token-value {
   color: var(--text-secondary);
   font-family: ui-monospace, monospace;
   font-size: 12px;
   overflow-wrap: anywhere;
   letter-spacing: 0.02em;
 }
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 0;
+  text-align: left;
+}
+.link-btn:hover { text-decoration: underline; }
 
 /* ── Command box ── */
 .command-box {
