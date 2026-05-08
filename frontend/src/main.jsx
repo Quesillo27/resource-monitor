@@ -965,17 +965,8 @@ function diskLabel(disk) {
   return disk.name || disk.mountpoint;
 }
 
-function defaultDownloadUrl(apiBase) {
-  try {
-    const parsed = new URL(apiBase);
-    parsed.port = '';
-    parsed.pathname = '/downloads';
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString().replace(/\/$/, '');
-  } catch {
-    return `${window.location.origin}/downloads`;
-  }
+function defaultDownloadUrl(_apiBase) {
+  return `${window.location.origin}/downloads`;
 }
 
 createRoot(document.getElementById('root')).render(<App />);

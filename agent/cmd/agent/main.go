@@ -69,7 +69,7 @@ func installCmd(args []string) {
 
 	existing, err := config.Load(path)
 	if err == nil {
-		if cfg.Credential == "" {
+		if cfg.Credential == "" && cfg.EnrollmentToken == "" {
 			cfg.Credential = existing.Credential
 		}
 		if cfg.AgentID == "" {
