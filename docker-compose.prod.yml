@@ -70,20 +70,9 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
     networks:
-      - internal
-      - resource-monitor
-    labels:
-      - traefik.http.routers.resource-monitor-18-web.rule=Host(`monitor.toolscode.cloud`)
-      - traefik.http.routers.resource-monitor-18-web.entrypoints=web
-      - traefik.http.services.resource-monitor-18-web.loadbalancer.server.port=80
-      - traefik.http.routers.resource-monitor-18-web.service=resource-monitor-18-web
-      - traefik.http.routers.resource-monitor-18-web.middlewares=redirect-to-https@file
-      - traefik.http.routers.resource-monitor-18-websecure.rule=Host(`monitor.toolscode.cloud`)
-      - traefik.http.routers.resource-monitor-18-websecure.entrypoints=websecure
-      - traefik.http.services.resource-monitor-18-websecure.loadbalancer.server.port=80
-      - traefik.http.routers.resource-monitor-18-websecure.service=resource-monitor-18-websecure
-      - traefik.http.routers.resource-monitor-18-websecure.tls.certresolver=letsencrypt
-      - traefik.enable=true
+      internal:
+      resource-monitor:
+        ipv4_address: 172.21.0.10
 
 volumes:
   postgres-data:
