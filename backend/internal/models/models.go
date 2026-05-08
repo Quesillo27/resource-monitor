@@ -146,10 +146,14 @@ type DiskMetric struct {
 }
 
 type NetMetric struct {
-	Name      string `json:"name"`
-	BytesSent uint64 `json:"bytes_sent"`
-	BytesRecv uint64 `json:"bytes_recv"`
-	Up        bool   `json:"up"`
+	Name       string     `json:"name"`
+	BytesSent  uint64     `json:"bytes_sent"`
+	BytesRecv  uint64     `json:"bytes_recv"`
+	Up         bool       `json:"up"`
+	Active     bool       `json:"active,omitempty"`
+	Hidden     bool       `json:"hidden,omitempty"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
+	HiddenAt   *time.Time `json:"hidden_at,omitempty"`
 }
 
 type ProcMetric struct {
