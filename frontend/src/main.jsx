@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import {
   Activity,
   AlertTriangle,
+  Bell,
   CheckCircle2,
   Copy,
   Cpu,
@@ -17,6 +18,7 @@ import {
   Monitor,
   Network,
   RefreshCw,
+  Save,
   Search,
   Send,
   Server,
@@ -636,12 +638,16 @@ function AlertsCenter({ api }) {
         <button className={tab === 'alerts' ? 'selected' : ''} onClick={() => setTab('alerts')}>Alertas activas</button>
         <button className={tab === 'stats' ? 'selected' : ''} onClick={() => setTab('stats')}>Estadísticas</button>
         <button className={tab === 'timeline' ? 'selected' : ''} onClick={() => setTab('timeline')}>Timeline</button>
+        <button className={tab === 'rules' ? 'selected' : ''} onClick={() => setTab('rules')}>Reglas</button>
         <button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button>
+        <button className={tab === 'telegram' ? 'selected' : ''} onClick={() => setTab('telegram')}>Telegram</button>
       </div>
       {tab === 'alerts' && <Alerts api={api} />}
       {tab === 'stats' && <AlertStats api={api} />}
       {tab === 'timeline' && <AlertTimeline api={api} />}
+      {tab === 'rules' && <AlertRulesPanel api={api} />}
       {tab === 'smtp' && <SMTPSettings api={api} />}
+      {tab === 'telegram' && <TelegramSettings api={api} />}
     </section>
   );
 }
@@ -730,28 +736,156 @@ function SMTPSettings({ api }) {
   if (!form) return <Skeleton />;
   const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
   async function save() {
-    const saved = await api.put('/api/alert-settings/smtp', { ...form, port: Number(form.port), cooldown_minutes: Number(form.cooldown_minutes) });
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    const saved = await api.put('/api/alert-settings/smtp', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
     setForm({ ...saved, password: '' });
     setMessage('Configuracion guardada');
     reload();
   }
   async function test() {
-    await api.post('/api/alert-settings/smtp/test', { ...form, port: Number(form.port), cooldown_minutes: Number(form.cooldown_minutes) });
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    await api.post('/api/alert-settings/smtp/test', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
     setMessage('Correo de prueba enviado');
   }
   return (
     <Panel title="Configuracion SMTP" action={<div className="actions"><IconButton icon={Send} label="Probar SMTP" onClick={test} /><IconButton icon={Mail} label="Guardar SMTP" onClick={save} /></div>}>
       <div className="smtp-grid">
-        <label><span><input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar correos</span></label>
+        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar correos</span></label>
         <label>Host<input value={form.host} onChange={(e) => set('host', e.target.value)} /></label>
         <label>Puerto<input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} /></label>
         <label>Usuario<input value={form.username} onChange={(e) => set('username', e.target.value)} /></label>
         <label>Contrasena<input type="password" value={form.password} placeholder="Mantener actual si se deja vacia" onChange={(e) => set('password', e.target.value)} /></label>
         <label>Remitente<input value={form.from_address} onChange={(e) => set('from_address', e.target.value)} /></label>
         <label>Destinatarios<input value={form.to_addresses} onChange={(e) => set('to_addresses', e.target.value)} placeholder="ops@empresa.com,infra@empresa.com" /></label>
-        <label>Cooldown minutos<input type="number" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
-        <label><span><input type="checkbox" checked={form.use_tls} onChange={(e) => set('use_tls', e.target.checked)} /> TLS directo</span></label>
-        <label><span><input type="checkbox" checked={form.use_starttls} onChange={(e) => set('use_starttls', e.target.checked)} /> STARTTLS</span></label>
+        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
+        <label><span><input type="checkbox" checked={!!form.use_tls} onChange={(e) => set('use_tls', e.target.checked)} /> TLS directo</span></label>
+        <label><span><input type="checkbox" checked={!!form.use_starttls} onChange={(e) => set('use_starttls', e.target.checked)} /> STARTTLS</span></label>
+      </div>
+      {message && <p className="success-text">{message}</p>}
+    </Panel>
+  );
+}
+
+function TelegramSettings({ api }) {
+  const { data, reload } = useLoad(() => api.get('/api/settings/telegram'), [], 0);
+  const [form, setForm] = useState(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => { if (data && !form) setForm({ ...data, bot_token: '' }); }, [data, form]);
+  if (!form) return <Skeleton />;
+  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
+  async function save() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    const saved = await api.put('/api/settings/telegram', { ...form, cooldown_minutes: cooldown });
+    setForm({ ...saved, bot_token: '' });
+    setMessage('Configuracion guardada');
+    reload();
+  }
+  async function test() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    await api.post('/api/settings/telegram/test', { ...form, cooldown_minutes: cooldown });
+    setMessage('Mensaje de prueba enviado');
+  }
+  return (
+    <Panel title="Configuracion Telegram" action={<div className="actions"><IconButton icon={Send} label="Probar Telegram" onClick={test} /><IconButton icon={Bell} label="Guardar Telegram" onClick={save} /></div>}>
+      <div className="smtp-grid">
+        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar Telegram</span></label>
+        <label>Bot Token<input type="password" value={form.bot_token} placeholder="Mantener actual si se deja vacio" onChange={(e) => set('bot_token', e.target.value)} /></label>
+        <label>Chat IDs<input value={form.chat_ids} onChange={(e) => set('chat_ids', e.target.value)} placeholder="-100123456789,@canal" /></label>
+        <label>Modo parse
+          <select value={form.parse_mode || 'HTML'} onChange={(e) => set('parse_mode', e.target.value)}>
+            <option value="HTML">HTML</option>
+            <option value="Markdown">Markdown</option>
+            <option value="MarkdownV2">MarkdownV2</option>
+          </select>
+        </label>
+        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
+      </div>
+      {message && <p className="success-text">{message}</p>}
+    </Panel>
+  );
+}
+
+const METRIC_LABELS = { cpu: 'CPU', ram: 'RAM', disk_used_percent: 'Disco', network_recv_mbps: 'Red recv', network_sent_mbps: 'Red sent', agent_offline_minutes: 'Sin conexion' };
+const METRIC_UNITS = { cpu: '%', ram: '%', disk_used_percent: '%', network_recv_mbps: 'Mbps', network_sent_mbps: 'Mbps', agent_offline_minutes: 'min' };
+
+function AlertRulesPanel({ api }) {
+  const { data, reload } = useLoad(() => api.get('/api/alert-rules/defaults'), [], 0);
+  const [rules, setRules] = useState(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => { if (data?.rules && !rules) setRules(data.rules); }, [data, rules]);
+  if (!rules) return <Skeleton />;
+  const setRule = (index, key, value) => setRules((prev) => prev.map((r, i) => i === index ? { ...r, [key]: value } : r));
+  async function save() {
+    const validated = rules.map((r) => ({
+      ...r,
+      threshold: parseFloat(r.threshold) || 0,
+      duration_samples: Math.max(1, parseInt(r.duration_samples, 10) || 2),
+      cooldown_minutes: Math.max(1, parseInt(r.cooldown_minutes, 10) || 30),
+    }));
+    const saved = await api.put('/api/alert-rules/defaults', { rules: validated });
+    setRules(saved.rules || []);
+    setMessage('Reglas guardadas');
+    reload();
+  }
+  return (
+    <Panel title="Reglas globales de alerta" action={<IconButton icon={Save} label="Guardar reglas" onClick={save} />}>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Metrica</th>
+              <th>Severidad</th>
+              <th>Umbral</th>
+              <th>Muestras</th>
+              <th>Cooldown (min)</th>
+              <th>Activa</th>
+              <th>Email</th>
+              <th>Telegram</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rules.map((rule, i) => (
+              <tr key={rule.id || i}>
+                <td>{METRIC_LABELS[rule.metric] || rule.metric}{rule.resource_key ? ` (${rule.resource_key})` : ''}</td>
+                <td><span className={`sev-badge ${rule.severity}`}>{rule.severity}</span></td>
+                <td>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={rule.threshold}
+                    onChange={(e) => setRule(i, 'threshold', e.target.value)}
+                    style={{ width: '70px' }}
+                    title={METRIC_UNITS[rule.metric] || ''}
+                  />
+                  <small style={{ marginLeft: '4px', color: 'var(--muted, #64748b)' }}>{METRIC_UNITS[rule.metric] || ''}</small>
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min="1"
+                    max="20"
+                    value={rule.duration_samples}
+                    onChange={(e) => setRule(i, 'duration_samples', e.target.value)}
+                    style={{ width: '55px' }}
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min="1"
+                    value={rule.cooldown_minutes}
+                    onChange={(e) => setRule(i, 'cooldown_minutes', e.target.value)}
+                    style={{ width: '65px' }}
+                  />
+                </td>
+                <td><input type="checkbox" checked={!!rule.enabled} onChange={(e) => setRule(i, 'enabled', e.target.checked)} /></td>
+                <td><input type="checkbox" checked={!!rule.notify_email} onChange={(e) => setRule(i, 'notify_email', e.target.checked)} /></td>
+                <td><input type="checkbox" checked={!!rule.notify_telegram} onChange={(e) => setRule(i, 'notify_telegram', e.target.checked)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
       {message && <p className="success-text">{message}</p>}
     </Panel>
