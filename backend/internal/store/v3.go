@@ -444,6 +444,12 @@ func sendWithClientV3(client *smtp.Client, auth smtp.Auth, from string, to []str
 
 func historyWindowV3(rangeName string) (string, string) {
 	switch strings.ToLower(rangeName) {
+	case "1h":
+		return "1 hour", "1 minute"
+	case "6h":
+		return "6 hours", "5 minutes"
+	case "12h":
+		return "12 hours", "5 minutes"
 	case "7d":
 		return "7 days", "1 hour"
 	case "30d":

@@ -411,6 +411,8 @@ function SummaryTab({ agent, status, disks, networks, services, alerts }) {
   );
 }
 
+const DISK_COLORS = ['#2563eb', '#059669', '#f59e0b', '#dc2626'];
+
 function ResourcesTab({ agent, history, historyLoading = false, disks: currentDisks = [], networks: currentNetworks = [], range, setRange }) {
   const rawMetrics = history?.metrics || [];
   const rawNetwork = history?.network || history?.networks || [];
@@ -420,12 +422,9 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
   const grid = generateTimeGrid(range);
   const metrics = padHistoryToGrid(rawMetrics, grid, ['cpu_percent', 'memory_used_percent', 'swap_used_percent', 'gateway_latency_ms']);
   const network = padHistoryToGrid(rawNetwork, grid, ['bytes_recv_per_sec', 'bytes_sent_per_sec']);
-  const diskHistory = padHistoryToGrid(rawDiskHistory, grid, diskNames, (bucket) => {
-    const row = { captured_at: bucket };
-    diskNames.forEach((name) => { row[name] = null; });
-    return row;
-  });
+  const disksForChart = pivotDisks(rawDiskHistory, diskNames, grid);
 
+  const hasGatewayData = rawMetrics.some((p) => p.gateway_latency_ms != null);
   const latestMetric = lastItem(rawMetrics) || {};
   const latestNetwork = lastItem(rawNetwork) || {};
   const latestDisks = latestDiskValues(rawDiskHistory);
@@ -435,8 +434,12 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
   return (
     <>
       <div className="chart-toolbar">
-        <div><h2>Historico de recursos</h2><span>Pasa el mouse por una linea para ver fecha, serie y valor exacto del punto.</span></div>
-        <div className="segmented">{['24h', '7d', '30d'].map((item) => <button key={item} className={range === item ? 'selected' : ''} onClick={() => setRange(item)}>{item}</button>)}</div>
+        <div><h2>Historico de recursos</h2><span>Pasa el mouse para ver fecha y valor exacto.</span></div>
+        <div className="segmented">
+          {['1h', '6h', '12h', '24h', '7d', '30d'].map((item) => (
+            <button key={item} className={range === item ? 'selected' : ''} onClick={() => setRange(item)}>{item}</button>
+          ))}
+        </div>
       </div>
       <div className="resource-console">
         <Panel title="Informacion del servidor">
@@ -463,18 +466,22 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
         </Panel>
       </div>
       <div className={`chart-grid${historyLoading ? ' chart-loading' : ''}`}>
-        <ChartPanel title="CPU / RAM / Swap" subtitle="Porcentaje de consumo por punto" unit="%">
-          <LineChart points={metrics} grid={grid} series={[["CPU", "cpu_percent", "#2563eb"], ["RAM", "memory_used_percent", "#7c3aed"], ["Swap", "swap_used_percent", "#d97706"]]} max={100} />
+        <ChartPanel title="CPU / RAM / Swap" subtitle="Porcentaje de consumo" unit="%">
+          <LineChart points={metrics} grid={grid} series={[["CPU", "cpu_percent", "#3b82f6"], ["RAM", "memory_used_percent", "#a855f7"], ["Swap", "swap_used_percent", "#f59e0b"]]} max={100} />
         </ChartPanel>
-        <ChartPanel title="Red" subtitle="Velocidad estimada recibida/enviada" unit="B/s">
-          <LineChart points={network} grid={grid} series={[["Recibido", "bytes_recv_per_sec", "#fb5b7b"], ["Enviado", "bytes_sent_per_sec", "#38a3ff"]]} formatter={rate} />
+        <ChartPanel title="Red" subtitle="Velocidad recibida / enviada" unit="B/s">
+          <LineChart points={network} grid={grid} series={[["Recibido", "bytes_recv_per_sec", "#ec4899"], ["Enviado", "bytes_sent_per_sec", "#06b6d4"]]} formatter={rate} />
         </ChartPanel>
-        <ChartPanel title="Latencia al gateway" subtitle="Latencia promedio al gateway por defecto" unit="ms">
-          <LineChart points={metrics} grid={grid} series={[["Latencia GW", "gateway_latency_ms", "#f59e0b"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : 'n/a'} />
-        </ChartPanel>
-        <ChartPanel title="Uso de disco por unidad o mount" subtitle="Porcentaje usado por filesystem" unit="%">
-          <LineChart points={pivotDisks(rawDiskHistory, diskNames, grid)} grid={grid} series={diskNames.map((name, index) => [name, name, ['#2563eb', '#059669', '#d97706', '#dc2626'][index]])} max={100} />
-        </ChartPanel>
+        {hasGatewayData && (
+          <ChartPanel title="Latencia al gateway" subtitle="Latencia promedio al gateway" unit="ms">
+            <LineChart points={metrics} grid={grid} series={[["Latencia GW", "gateway_latency_ms", "#10b981"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : '—'} />
+          </ChartPanel>
+        )}
+        {diskNames.length > 0 && (
+          <ChartPanel title="Uso de disco" subtitle="% usado por unidad / mount" unit="%">
+            <LineChart points={disksForChart} grid={grid} series={diskNames.map((name, i) => [name, name, DISK_COLORS[i % DISK_COLORS.length]])} max={100} />
+          </ChartPanel>
+        )}
       </div>
     </>
   );
@@ -1064,37 +1071,42 @@ function Usage({ value }) {
 
 function generateTimeGrid(range) {
   const now = Date.now();
-  const buckets = { '24h': { ms: 24 * 60 * 60 * 1000, step: 5 * 60 * 1000 }, '7d': { ms: 7 * 24 * 60 * 60 * 1000, step: 60 * 60 * 1000 }, '30d': { ms: 30 * 24 * 60 * 60 * 1000, step: 6 * 60 * 60 * 1000 } };
-  const { ms, step } = buckets[range] || buckets['24h'];
+  const cfg = {
+    '1h':  { ms:      60 * 60 * 1000, step:      60 * 1000 },
+    '6h':  { ms:  6 * 60 * 60 * 1000, step:  5 * 60 * 1000 },
+    '12h': { ms: 12 * 60 * 60 * 1000, step:  5 * 60 * 1000 },
+    '24h': { ms: 24 * 60 * 60 * 1000, step:  5 * 60 * 1000 },
+    '7d':  { ms:  7 * 24 * 60 * 60 * 1000, step: 60 * 60 * 1000 },
+    '30d': { ms: 30 * 24 * 60 * 60 * 1000, step: 6 * 60 * 60 * 1000 },
+  };
+  const { ms, step } = cfg[range] || cfg['24h'];
   const start = now - ms;
   const grid = [];
-  for (let t = start; t <= now; t += step) {
-    grid.push(new Date(Math.floor(t / step) * step).toISOString());
+  for (let t = start; t <= now + step; t += step) {
+    grid.push(Math.floor(t / step) * step);
   }
   return grid;
 }
 
 function padHistoryToGrid(data, grid, keys) {
-  if (!data?.length || !grid?.length) {
-    return grid.map((ts) => {
-      const row = { captured_at: ts };
-      keys.forEach((k) => { row[k] = null; });
-      return row;
-    });
-  }
-  const stepMs = (new Date(grid[1] || grid[0]).getTime() - new Date(grid[0]).getTime()) || 60000;
+  if (!grid?.length) return [];
+  const emptyRow = (tsMs) => {
+    const row = { captured_at: new Date(tsMs).toISOString() };
+    keys.forEach((k) => { row[k] = null; });
+    return row;
+  };
+  if (!data?.length) return grid.map(emptyRow);
+  const stepMs = grid.length > 1 ? grid[1] - grid[0] : 60000;
   const byBucket = {};
   data.forEach((p) => {
     const t = new Date(p.captured_at).getTime();
-    const bucket = new Date(Math.round(t / stepMs) * stepMs).toISOString();
+    const bucket = Math.round(t / stepMs) * stepMs;
     byBucket[bucket] = p;
   });
-  return grid.map((ts) => {
-    const match = byBucket[ts];
-    if (match) return match;
-    const row = { captured_at: ts };
-    keys.forEach((k) => { row[k] = null; });
-    return row;
+  return grid.map((tsMs) => {
+    const match = byBucket[tsMs];
+    if (match) return { ...match, captured_at: new Date(tsMs).toISOString() };
+    return emptyRow(tsMs);
   });
 }
 
@@ -1124,12 +1136,12 @@ function LineChart({ points, grid, series, max, formatter }) {
             <path d="M0 8 H100" /><path d="M0 18 H100" /><path d="M0 28 H100" /><path d="M0 38 H100" /><path d="M0 48 H100" />
             {activePoint && <line className="chart-cursor" x1={activeX} x2={activeX} y1="8" y2="48" />}
             {hasAnyData && series.map(([label, key, color]) => (
-              <path key={label} d={polylinePath(displayPoints, key, chartMax)} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+              <path key={label} className="chart-line" d={polylinePath(displayPoints, key, chartMax)} style={{ stroke: color }} />
             ))}
             {activePoint && series.map(([label, key, color]) => {
               if (activePoint[key] == null) return null;
               const y = 48 - (Math.max(0, Number(activePoint[key])) / chartMax) * 40;
-              return <circle key={`${label}-dot`} cx={activeX} cy={y} r="1.1" style={{ fill: color }} />;
+              return <circle key={`${label}-dot`} cx={activeX} cy={y} r="1.4" style={{ fill: color, stroke: 'none' }} />;
             })}
           </svg>
           {!hasAnyData && <div className="chart-no-data">Sin datos en este rango</div>}
@@ -1175,18 +1187,32 @@ function polylinePath(points, key, maxValue) {
 }
 
 function pivotDisks(disks, names, grid) {
-  const byTime = {};
-  disks.forEach((disk) => {
-    const key = disk.captured_at;
-    byTime[key] = byTime[key] || { captured_at: key };
-    const name = disk.mountpoint || disk.name;
-    if (names.includes(name)) byTime[key][name] = disk.used_percent;
-  });
-  if (!grid?.length) return Object.values(byTime);
-  return grid.map((ts) => {
-    if (byTime[ts]) return byTime[ts];
-    const row = { captured_at: ts };
+  const emptyRow = (tsMs) => {
+    const row = { captured_at: new Date(tsMs).toISOString() };
     names.forEach((n) => { row[n] = null; });
+    return row;
+  };
+  const stepMs = grid?.length > 1 ? grid[1] - grid[0] : 60000;
+  const byBucket = {};
+  disks.forEach((disk) => {
+    const t = new Date(disk.captured_at).getTime();
+    const bucket = Math.round(t / stepMs) * stepMs;
+    byBucket[bucket] = byBucket[bucket] || { _ts: bucket };
+    const name = disk.mountpoint || disk.name;
+    if (names.includes(name)) byBucket[bucket][name] = disk.used_percent;
+  });
+  if (!grid?.length) {
+    return Object.values(byBucket).map((r) => {
+      const row = { captured_at: new Date(r._ts).toISOString() };
+      names.forEach((n) => { row[n] = r[n] ?? null; });
+      return row;
+    }).sort((a, b) => a.captured_at.localeCompare(b.captured_at));
+  }
+  return grid.map((tsMs) => {
+    const r = byBucket[tsMs];
+    if (!r) return emptyRow(tsMs);
+    const row = { captured_at: new Date(tsMs).toISOString() };
+    names.forEach((n) => { row[n] = r[n] ?? null; });
     return row;
   });
 }
