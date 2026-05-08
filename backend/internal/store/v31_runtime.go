@@ -278,6 +278,47 @@ func (s *Store) EnsureV31Schema(ctx context.Context) error {
 	return nil
 }
 
+func (s *Store) AlertStats(ctx context.Context) ([]map[string]any, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+			a.name AS agent_name,
+			COUNT(*) FILTER (WHERE al.active) AS active_count,
+			COUNT(*) FILTER (WHERE al.severity = 'critical') AS critical_total,
+			COUNT(*) FILTER (WHERE al.severity = 'warning') AS warning_total,
+			MAX(al.opened_at) AS last_alert_at
+		FROM alerts al
+		JOIN agents a ON a.id = al.agent_id
+		GROUP BY a.id, a.name
+		HAVING COUNT(*) > 0
+		ORDER BY active_count DESC, last_alert_at DESC
+		LIMIT 20
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []map[string]any
+	for rows.Next() {
+		var agentName string
+		var activeCount, criticalTotal, warningTotal int
+		var lastAlertAt time.Time
+		if err := rows.Scan(&agentName, &activeCount, &criticalTotal, &warningTotal, &lastAlertAt); err != nil {
+			return nil, err
+		}
+		result = append(result, map[string]any{
+			"agent_name":     agentName,
+			"active_count":   activeCount,
+			"critical_total": criticalTotal,
+			"warning_total":  warningTotal,
+			"last_alert_at":  lastAlertAt,
+		})
+	}
+	if result == nil {
+		result = []map[string]any{}
+	}
+	return result, nil
+}
+
 func (s *Store) ensureAlertRuntimeSchemas(ctx context.Context) error {
 	if err := s.EnsureV3Schema(ctx); err != nil {
 		return err

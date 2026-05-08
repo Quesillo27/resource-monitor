@@ -51,6 +51,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
 			r.Get("/alerts", s.listAlerts)
+			r.Get("/alerts/stats", s.alertStats)
 			r.Post("/alerts/seen-all", s.markAllAlertsSeen)
 			r.Post("/alerts/{id}/seen", s.markAlertSeen)
 			r.Get("/alert-rules/defaults", s.defaultAlertRules)
@@ -293,6 +294,15 @@ func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"alerts": alerts})
+}
+
+func (s *Server) alertStats(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.store.AlertStats(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "alert stats failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"stats": stats})
 }
 
 func (s *Server) markAlertSeen(w http.ResponseWriter, r *http.Request) {

@@ -570,14 +570,102 @@ function Enrollment({ api }) {
   );
 }
 
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `hace ${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `hace ${hrs}h`;
+  return `hace ${Math.floor(hrs / 24)}d`;
+}
+
 function AlertsCenter({ api }) {
   const [tab, setTab] = useState('alerts');
   return (
     <section>
       <Header title="Alertas" />
-      <div className="tab-row"><button className={tab === 'alerts' ? 'selected' : ''} onClick={() => setTab('alerts')}>Alertas activas</button><button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button></div>
-      {tab === 'alerts' ? <Alerts api={api} /> : <SMTPSettings api={api} />}
+      <div className="tab-row">
+        <button className={tab === 'alerts' ? 'selected' : ''} onClick={() => setTab('alerts')}>Alertas activas</button>
+        <button className={tab === 'stats' ? 'selected' : ''} onClick={() => setTab('stats')}>Estadísticas</button>
+        <button className={tab === 'timeline' ? 'selected' : ''} onClick={() => setTab('timeline')}>Timeline</button>
+        <button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button>
+      </div>
+      {tab === 'alerts' && <Alerts api={api} />}
+      {tab === 'stats' && <AlertStats api={api} />}
+      {tab === 'timeline' && <AlertTimeline api={api} />}
+      {tab === 'smtp' && <SMTPSettings api={api} />}
     </section>
+  );
+}
+
+function AlertStats({ api }) {
+  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts/stats'), [], 0);
+  const rows = data?.stats || [];
+  return (
+    <Panel title="Estadísticas por agente" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
+      {rows.length === 0 ? (
+        <p className="empty-panel">Sin historial de alertas</p>
+      ) : (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Agente</th>
+              <th>Alertas activas</th>
+              <th>Críticas (total)</th>
+              <th>Warnings (total)</th>
+              <th>Última alerta</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} style={row.active_count > 0 ? { background: 'rgba(220,38,38,0.08)', color: 'var(--red, #dc2626)' } : {}}>
+                <td>{row.agent_name}</td>
+                <td>{row.active_count}</td>
+                <td>{row.critical_total}</td>
+                <td>{row.warning_total}</td>
+                <td>{row.last_alert_at ? timeAgo(row.last_alert_at) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Panel>
+  );
+}
+
+function AlertTimeline({ api }) {
+  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts?active=false'), [], 0);
+  const alerts = (data?.alerts || []).slice(0, 50);
+  return (
+    <Panel title="Timeline de alertas" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
+      {alerts.length === 0 ? (
+        <p className="empty-panel">Sin historial de alertas</p>
+      ) : (
+        <div className="alert-list">
+          {alerts.map((alert) => {
+            let duration = null;
+            if (alert.resolved_at) {
+              const diffMs = new Date(alert.resolved_at).getTime() - new Date(alert.opened_at).getTime();
+              const diffMins = Math.floor(diffMs / 60000);
+              duration = diffMins < 60 ? `${diffMins}m` : `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
+            }
+            return (
+              <article className={`alert-card sev-${alert.severity}`} key={alert.id}>
+                <AlertTriangle size={18} style={{ color: alert.severity === 'critical' ? '#dc2626' : '#d97706' }} />
+                <div>
+                  <strong>{alert.agent_name} · {alert.metric || alert.message}</strong>
+                  <span>
+                    {timeAgo(alert.opened_at)}
+                    {duration && <> · Resuelta en {duration}</>}
+                    {alert.active && <> · <span className="sev-badge critical">ACTIVA</span></>}
+                  </span>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </Panel>
   );
 }
 
