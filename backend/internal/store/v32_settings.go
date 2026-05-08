@@ -232,12 +232,12 @@ func (s *Store) TestTelegramSettings(ctx context.Context, settings models.Telegr
 
 func normalizeRoleV32(role string) string {
 	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "admin":
+		return "admin"
 	case "operator":
 		return "operator"
-	case "viewer":
-		return "viewer"
 	default:
-		return "admin"
+		return "viewer"
 	}
 }
 
@@ -259,8 +259,12 @@ type pendingAlertV32 struct {
 	OpenedAt                  time.Time
 }
 
+func sanitizeMailHeader(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
 func sendAlertHTMLMailV32(settings models.SMTPSettings, alert pendingAlertV32, processes []models.ProcMetric) error {
-	subject := "Resource Monitor alerta " + strings.ToUpper(alert.Severity) + " - " + alert.Agent
+	subject := "Resource Monitor alerta " + strings.ToUpper(sanitizeMailHeader(alert.Severity)) + " - " + sanitizeMailHeader(alert.Agent)
 	text := alertPlainTextV32(alert, processes)
 	htmlBody := alertHTMLV32(alert, processes)
 	return sendHTMLMailV32(settings, subject, text, htmlBody)
@@ -283,9 +287,9 @@ func sendHTMLMailV32(settings models.SMTPSettings, subject, textBody, htmlBody s
 	}
 	boundary := "rm-alt-2026"
 	msg := bytes.Buffer{}
-	msg.WriteString("From: " + from + "\r\n")
-	msg.WriteString("To: " + strings.Join(to, ", ") + "\r\n")
-	msg.WriteString("Subject: " + subject + "\r\n")
+	msg.WriteString("From: " + sanitizeMailHeader(from) + "\r\n")
+	msg.WriteString("To: " + sanitizeMailHeader(strings.Join(to, ", ")) + "\r\n")
+	msg.WriteString("Subject: " + sanitizeMailHeader(subject) + "\r\n")
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString("Content-Type: multipart/alternative; boundary=" + boundary + "\r\n\r\n")
 	msg.WriteString("--" + boundary + "\r\n")

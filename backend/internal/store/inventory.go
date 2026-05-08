@@ -63,18 +63,35 @@ func (s *Store) SaveInventory(ctx context.Context, agentID string, inv models.In
 		return err
 	}
 
+	const maxSoftwareItems = 5000
 	if len(inv.Software) > 0 {
 		if _, err := tx.Exec(ctx, "DELETE FROM software_inventory WHERE agent_id = $1", agentID); err != nil {
 			return err
 		}
-		for _, sw := range inv.Software {
+		items := inv.Software
+		if len(items) > maxSoftwareItems {
+			items = items[:maxSoftwareItems]
+		}
+		for _, sw := range items {
 			if sw.Name == "" {
 				continue
+			}
+			name := sw.Name
+			if len(name) > 256 {
+				name = name[:256]
+			}
+			version := sw.Version
+			if len(version) > 64 {
+				version = version[:64]
+			}
+			publisher := sw.Publisher
+			if len(publisher) > 256 {
+				publisher = publisher[:256]
 			}
 			if _, err := tx.Exec(ctx, `
 				INSERT INTO software_inventory (agent_id, name, version, publisher)
 				VALUES ($1,$2,$3,$4)
-			`, agentID, sw.Name, sw.Version, sw.Publisher); err != nil {
+			`, agentID, name, version, publisher); err != nil {
 				return err
 			}
 		}

@@ -56,14 +56,8 @@ else
 fi
 
 TMP_BIN="$(mktemp)"
-TMP_SRC=""
 INSTALL_PATH="/usr/local/bin/resource-monitor-agent"
-cleanup() {
-  rm -f "$TMP_BIN"
-  if [[ -n "$TMP_SRC" ]]; then
-    rm -rf "$TMP_SRC"
-  fi
-}
+cleanup() { rm -f "$TMP_BIN"; }
 trap cleanup EXIT
 
 systemctl stop resource-monitor-agent 2>/dev/null || true
@@ -72,21 +66,30 @@ DOWNLOAD_ASSET_URL="${BASE_URL}/${ASSET}"
 if [[ -n "$AGENT_URL" ]]; then
   DOWNLOAD_ASSET_URL="$AGENT_URL"
 fi
+CHECKSUM_URL="${BASE_URL}/checksums.txt"
+
 echo "Downloading ${DOWNLOAD_ASSET_URL}..."
-if ! curl -fL "$DOWNLOAD_ASSET_URL" -o "$TMP_BIN"; then
-  echo "Binary was not found. Falling back to build from source..."
-  if ! command -v git >/dev/null 2>&1; then
-    echo "git is required for source fallback." >&2
-    exit 1
-  fi
-  if ! command -v go >/dev/null 2>&1; then
-    echo "go is required for source fallback." >&2
-    exit 1
-  fi
-  TMP_SRC="$(mktemp -d)"
-  git clone --depth 1 "https://github.com/${REPO}.git" "$TMP_SRC"
-  (cd "$TMP_SRC/agent" && go mod tidy && go build -o "$TMP_BIN" ./cmd/agent)
+if ! curl -fsSL "$DOWNLOAD_ASSET_URL" -o "$TMP_BIN"; then
+  echo "Failed to download agent binary from ${DOWNLOAD_ASSET_URL}" >&2
+  exit 1
 fi
+
+# Verify SHA256 checksum if available
+if curl -fsSL "$CHECKSUM_URL" -o "${TMP_BIN}.checksums" 2>/dev/null; then
+  EXPECTED=$(grep "${ASSET}$" "${TMP_BIN}.checksums" | awk '{print $1}')
+  rm -f "${TMP_BIN}.checksums"
+  if [[ -n "$EXPECTED" ]]; then
+    ACTUAL=$(sha256sum "$TMP_BIN" | awk '{print $1}')
+    if [[ "$EXPECTED" != "$ACTUAL" ]]; then
+      echo "Checksum verification failed!" >&2
+      echo "  Expected: $EXPECTED" >&2
+      echo "  Got:      $ACTUAL" >&2
+      exit 1
+    fi
+    echo "Checksum OK."
+  fi
+fi
+
 install -m 0755 "$TMP_BIN" "$INSTALL_PATH"
 
 ARGS=(install --server-url "$SERVER_URL" --interval "$INTERVAL" --profile "$PROFILE")

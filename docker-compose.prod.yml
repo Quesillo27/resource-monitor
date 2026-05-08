@@ -48,6 +48,7 @@ services:
       go mod tidy &&
       GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
       GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
+      cd /downloads && sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe > checksums.txt &&
       cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
       cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&
       chmod 0644 /downloads/*"

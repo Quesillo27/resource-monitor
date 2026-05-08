@@ -63,6 +63,24 @@ try {
   throw "Descarga fallida: $msg"
 }
 
+# Verify SHA256 checksum if checksums.txt is available
+$checksumUrl = "$baseUrl/checksums.txt"
+try {
+  $checksumContent = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -TimeoutSec 10).Content
+  $expectedLine = ($checksumContent -split "`n") | Where-Object { $_ -match "resource-monitor-agent-windows-amd64\.exe$" }
+  if ($expectedLine) {
+    $expected = ($expectedLine -split "\s+")[0].Trim()
+    $actual = (Get-FileHash -Path $installPath -Algorithm SHA256).Hash.ToLower()
+    if ($expected -ne $actual) {
+      Remove-Item $installPath -Force
+      throw "Checksum incorrecto. Esperado: $expected  Obtenido: $actual"
+    }
+    Write-Host "Checksum OK."
+  }
+} catch [System.Net.WebException] {
+  # checksums.txt no disponible — continuar sin verificar
+}
+
 Write-Host "Instalando/actualizando resource-monitor-agent..."
 $installArgs = @("install", "--server-url", $ServerUrl, "--interval", $Interval, "--profile", $Profile)
 if ($EnrollmentToken -ne "") { $installArgs += @("--enrollment-token", $EnrollmentToken) }
