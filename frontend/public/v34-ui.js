@@ -59,19 +59,28 @@
   }
 
   function api(path, options = {}) {
-    return originalFetch(apiURL(path), {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token()}`,
-        ...(options.headers || {}),
-      },
-    }).then(async (res) => {
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(payload.error || `request failed ${res.status}`);
-      }
-      return payload;
+    const method = options.method || 'GET';
+    const body = options.body || null;
+    return new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open(method, apiURL(path), true);
+      request.setRequestHeader('Content-Type', 'application/json');
+      request.setRequestHeader('Authorization', `Bearer ${token()}`);
+      request.onload = () => {
+        let payload = {};
+        try {
+          payload = request.responseText ? JSON.parse(request.responseText) : {};
+        } catch (_) {
+          payload = {};
+        }
+        if (request.status >= 200 && request.status < 300) {
+          resolve(payload);
+        } else {
+          reject(new Error(payload.error || `request failed ${request.status}`));
+        }
+      };
+      request.onerror = () => reject(new Error('network request failed'));
+      request.send(body);
     });
   }
 
@@ -94,22 +103,35 @@
 
   function injectHistoryRanges() {
     const toolbar = [...document.querySelectorAll('.chart-toolbar .segmented')].find((el) => el.textContent.includes('24h'));
-    if (!toolbar || toolbar.dataset.v34Ranges === '1') return;
-    toolbar.dataset.v34Ranges = '1';
-    ['1h', '6h', '12h'].reverse().forEach((range) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = range;
-      button.addEventListener('click', () => {
-        preferredRange = range;
-        sessionStorage.setItem('rm_history_range', range);
-        toolbar.querySelectorAll('button').forEach((item) => item.classList.remove('selected'));
-        button.classList.add('selected');
-        const native = [...toolbar.querySelectorAll('button')].find((item) => item.textContent.trim() === '24h');
-        native?.click();
-        setTimeout(clickRefresh, 100);
+    if (!toolbar) return;
+    if (toolbar.dataset.v34Ranges !== '1') {
+      toolbar.dataset.v34Ranges = '1';
+      ['1h', '6h', '12h'].reverse().forEach((range) => {
+        if ([...toolbar.querySelectorAll('button')].some((item) => item.textContent.trim() === range)) return;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = range;
+        toolbar.prepend(button);
       });
-      toolbar.prepend(button);
+    }
+    toolbar.querySelectorAll('button').forEach((button) => {
+      if (button.dataset.v34RangeBound === '1') return;
+      button.dataset.v34RangeBound = '1';
+      button.addEventListener('click', () => {
+        const nextRange = button.textContent.trim();
+        preferredRange = nextRange;
+        sessionStorage.setItem('rm_history_range', nextRange);
+        syncHistoryRangeSelection(toolbar);
+        setTimeout(clickRefresh, 80);
+      });
+    });
+    syncHistoryRangeSelection(toolbar);
+  }
+
+  function syncHistoryRangeSelection(toolbar) {
+    const selected = preferredRange || toolbar.querySelector('button.selected')?.textContent?.trim() || '24h';
+    toolbar.querySelectorAll('button').forEach((button) => {
+      button.classList.toggle('selected', button.textContent.trim() === selected);
     });
   }
 
@@ -130,7 +152,10 @@
 
   function injectNetworkValidation() {
     const networkTabSelected = [...document.querySelectorAll('.tab-row button.selected')].some((button) => button.textContent.trim() === 'Red');
-    if (!networkTabSelected) return;
+    if (!networkTabSelected) {
+      document.querySelectorAll('.network-clean-toolbar').forEach((item) => item.remove());
+      return;
+    }
     applyHiddenNetworkRows();
     if (document.querySelector('[data-v34-network-reconcile]')) return;
     const table = document.querySelector('.table-wrap');
