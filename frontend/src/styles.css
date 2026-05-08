@@ -596,7 +596,7 @@ tbody tr:last-child td { border-bottom: 0; }
 }
 
 .chart path.chart-line {
-  stroke-width: 1.2;
+  stroke-width: 0.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }

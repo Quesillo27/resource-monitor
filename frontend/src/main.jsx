@@ -424,7 +424,6 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
   const network = padHistoryToGrid(rawNetwork, grid, ['bytes_recv_per_sec', 'bytes_sent_per_sec']);
   const disksForChart = pivotDisks(rawDiskHistory, diskNames, grid);
 
-  const hasGatewayData = rawMetrics.some((p) => p.gateway_latency_ms != null);
   const latestMetric = lastItem(rawMetrics) || {};
   const latestNetwork = lastItem(rawNetwork) || {};
   const latestDisks = latestDiskValues(rawDiskHistory);
@@ -472,11 +471,9 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
         <ChartPanel title="Red" subtitle="Velocidad recibida / enviada" unit="B/s">
           <LineChart points={network} grid={grid} series={[["Recibido", "bytes_recv_per_sec", "#ec4899"], ["Enviado", "bytes_sent_per_sec", "#06b6d4"]]} formatter={rate} />
         </ChartPanel>
-        {hasGatewayData && (
-          <ChartPanel title="Latencia al gateway" subtitle="Latencia promedio al gateway" unit="ms">
-            <LineChart points={metrics} grid={grid} series={[["Latencia GW", "gateway_latency_ms", "#10b981"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : '—'} />
-          </ChartPanel>
-        )}
+        <ChartPanel title="Latencia al gateway" subtitle="Latencia promedio al gateway" unit="ms">
+          <LineChart points={metrics} grid={grid} series={[["Latencia GW", "gateway_latency_ms", "#10b981"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : '—'} />
+        </ChartPanel>
         {diskNames.length > 0 && (
           <ChartPanel title="Uso de disco" subtitle="% usado por unidad / mount" unit="%">
             <LineChart points={disksForChart} grid={grid} series={diskNames.map((name, i) => [name, name, DISK_COLORS[i % DISK_COLORS.length]])} max={100} />
