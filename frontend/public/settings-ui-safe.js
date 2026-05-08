@@ -1,5 +1,5 @@
 (() => {
-  const API_BASE = `${location.protocol}//${location.hostname}:8080`;
+  const API_BASE = ''; // proxied by nginx
   let activeTab = 'smtp';
   let lastToken = '';
   let users = [];

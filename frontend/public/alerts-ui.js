@@ -1,5 +1,5 @@
 (() => {
-  const API_BASE = `${location.protocol}//${location.hostname}:8080`;
+  const API_BASE = ''; // proxied by nginx
   const css = `
     .rm-alert-center-title { display:flex; align-items:center; justify-content:space-between; gap:12px; }
     .rm-alert-center-title small { color:#64748b; font-size:12px; font-weight:700; }

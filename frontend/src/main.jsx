@@ -105,10 +105,11 @@ function Login({ onLogin }) {
       <form className="login-panel" onSubmit={submit}>
         <div className="login-mark"><Activity size={34} /></div>
         <h1>Resource Monitor</h1>
-        <label>Usuario<input value={username} onChange={(e) => setUsername(e.target.value)} /></label>
-        <label>Contrasena<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+        <p className="login-sub">Monitoreo de infraestructura</p>
+        <label>Usuario<input value={username} autoComplete="username" placeholder="admin" onChange={(e) => setUsername(e.target.value)} /></label>
+        <label>Contraseña<input type="password" autoComplete="current-password" value={password} placeholder="••••••••" onChange={(e) => setPassword(e.target.value)} /></label>
         {error && <p className="form-error">{error}</p>}
-        <button className="primary" disabled={loading}>{loading ? 'Entrando...' : 'Entrar'}</button>
+        <button className="primary" disabled={loading}>{loading ? 'Entrando…' : 'Iniciar sesión'}</button>
       </form>
     </div>
   );
@@ -479,8 +480,20 @@ function Status({ status }) {
 }
 
 function StatusDonut({ counts }) {
-  const total = Object.values(counts).reduce((sum, value) => sum + Number(value || 0), 0) || 1;
-  return <div className="status-donut"><Gauge size={42} /><span>{Math.round((Number(counts.online || 0) / total) * 100)}%</span><small>online</small></div>;
+  const online = Number(counts.online || 0);
+  const warning = Number(counts.warning || 0);
+  const critical = Number(counts.critical || 0);
+  const offline = Number(counts.offline || 0);
+  const total = online + warning + critical + offline || 1;
+  const pct = Math.round((online / total) * 100);
+  const tone = critical > 0 ? 'critical' : warning > 0 ? 'warning' : 'online';
+  return (
+    <div className={`status-donut tone-${tone}`}>
+      <Gauge size={36} />
+      <span>{pct}%</span>
+      <small>{online} de {total} online</small>
+    </div>
+  );
 }
 
 function MiniAgentList({ agents, metric, empty = 'Sin datos' }) {
@@ -489,8 +502,20 @@ function MiniAgentList({ agents, metric, empty = 'Sin datos' }) {
 }
 
 function AlertList({ alerts, compact = false }) {
-  if (!alerts.length) return <p className="empty-panel">Sin alertas activas</p>;
-  return <div className={`alert-list ${compact ? 'compact' : ''}`}>{alerts.map((alert) => <article className={`alert-card ${alert.severity}`} key={alert.id}><AlertTriangle size={20} /><div><strong>{alert.message}</strong><span>{alert.agent_name} - {alert.severity} - {date(alert.opened_at)}</span></div></article>)}</div>;
+  if (!alerts.length) return <p className="empty-panel">Sin alertas activas ✓</p>;
+  return (
+    <div className={`alert-list ${compact ? 'compact' : ''}`}>
+      {alerts.map((alert) => (
+        <article className={`alert-card sev-${alert.severity}`} key={alert.id}>
+          <AlertTriangle size={18} />
+          <div>
+            <strong>{alert.message}</strong>
+            <span>{alert.agent_name} · <span className={`sev-badge ${alert.severity}`}>{alert.severity}</span> · {date(alert.opened_at)}</span>
+          </div>
+        </article>
+      ))}
+    </div>
+  );
 }
 
 function DisksTable({ disks }) {
@@ -498,7 +523,7 @@ function DisksTable({ disks }) {
 }
 
 function NetworkTable({ networks }) {
-  return <DataTable empty="Sin muestras de red" columns={['Interfaz', 'Estado', 'Recibido', 'Enviado']} rows={networks.map((n) => [n.name, n.up ? 'up' : 'down', bytes(n.bytes_recv), bytes(n.bytes_sent)])} />;
+  return <DataTable empty="Sin muestras de red" columns={['Interfaz', 'Estado', 'Recibido', 'Enviado']} rows={networks.map((n) => [n.name, <span className={`net-state ${n.up ? 'up' : 'down'}`}>{n.up ? '● up' : '○ down'}</span>, bytes(n.bytes_recv), bytes(n.bytes_sent)])} />;
 }
 
 function ProcessesTable({ processes }) {
@@ -506,7 +531,7 @@ function ProcessesTable({ processes }) {
 }
 
 function ServicesTable({ services }) {
-  return <DataTable empty="Sin servicios configurados" columns={['Servicio', 'Estado']} rows={services.map((s) => [s.name, s.status])} />;
+  return <DataTable empty="Sin servicios configurados" columns={['Servicio', 'Estado']} rows={services.map((s) => [s.name, <span className={`svc-state ${s.status === 'running' ? 'ok' : 'err'}`}>{s.status}</span>])} />;
 }
 
 function DataTable({ columns, rows, empty }) {
@@ -644,7 +669,24 @@ function WizardStep({ index, title, children }) {
 }
 
 function CommandBlock({ title, command }) {
-  return <div className="command-box"><div><span>{title}</span><code>{command}</code></div><IconButton icon={Copy} label={`Copiar ${title}`} onClick={() => navigator.clipboard?.writeText(command)} /></div>;
+  const [copied, setCopied] = useState(false);
+  function copy() {
+    navigator.clipboard?.writeText(command);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+  return (
+    <div className="command-box">
+      <div className="command-content">
+        <span className="command-title">{title}</span>
+        <code>{command}</code>
+      </div>
+      <button className={`copy-btn ${copied ? 'copied' : ''}`} title="Copiar" aria-label="Copiar comando" onClick={copy}>
+        <Copy size={16} />
+        {copied ? 'Copiado' : 'Copiar'}
+      </button>
+    </div>
+  );
 }
 
 function IconButton({ icon: Icon, label, onClick }) {
@@ -656,7 +698,17 @@ function RefreshMeta({ lastUpdated, loading, onRefresh }) {
 }
 
 function Skeleton() {
-  return <div className="skeleton" />;
+  return <div className="skeleton-wrap"><div className="skeleton" /><div className="skeleton" style={{ width: '70%' }} /><div className="skeleton" style={{ width: '85%' }} /></div>;
+}
+
+function EmptyState({ icon: Icon = Server, title, subtitle }) {
+  return (
+    <div className="empty-state">
+      <Icon size={40} strokeWidth={1.2} />
+      <strong>{title}</strong>
+      {subtitle && <span>{subtitle}</span>}
+    </div>
+  );
 }
 
 function useLoad(loader, deps, refreshMs = 0) {
@@ -751,13 +803,13 @@ function diskLabel(disk) {
 function defaultDownloadUrl(apiBase) {
   try {
     const parsed = new URL(apiBase);
-    parsed.port = '3000';
+    parsed.port = '';
     parsed.pathname = '/downloads';
     parsed.search = '';
     parsed.hash = '';
     return parsed.toString().replace(/\/$/, '');
   } catch {
-    return 'http://localhost:3000/downloads';
+    return `${window.location.origin}/downloads`;
   }
 }
 

@@ -4,7 +4,7 @@
   let currentAgentDetail = null;
   let preferredRange = sessionStorage.getItem('rm_history_range') || '';
 
-  const API_BASE = `${window.location.protocol}//${window.location.hostname}:8080`;
+  const API_BASE = ''; // proxied by nginx
   const originalFetch = window.fetch.bind(window);
   const style = document.createElement('style');
   style.textContent = `

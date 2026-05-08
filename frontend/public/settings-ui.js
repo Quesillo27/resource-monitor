@@ -1,5 +1,5 @@
 (() => {
-  const API_BASE = `${location.protocol}//${location.hostname}:8080`;
+  const API_BASE = ''; // proxied by nginx
   const css = `
     .rm-settings-nav { margin-top:8px; display:flex; align-items:center; gap:12px; width:100%; border:0; background:transparent; color:#dbeafe; padding:12px 16px; border-radius:8px; font:inherit; cursor:pointer; text-align:left; }
     .rm-settings-nav:hover,.rm-settings-nav.active { background:#24364a; color:#fff; }

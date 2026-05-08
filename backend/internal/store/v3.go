@@ -517,9 +517,9 @@ func deriveDownloadBaseV3(serverURL, downloadURL string) string {
 	}
 	parsed := strings.TrimRight(serverURL, "/")
 	if parsed == "" {
-		return "http://localhost:3000/downloads"
+		return "/downloads"
 	}
-	return strings.Replace(parsed, ":8080", ":3000", 1) + "/downloads"
+	return parsed + "/downloads"
 }
 
 func shellQuoteV3(value string) string {
