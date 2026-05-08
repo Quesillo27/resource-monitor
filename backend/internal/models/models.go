@@ -134,6 +134,7 @@ type MetricsRequest struct {
 	Processes         []ProcMetric `json:"processes,omitempty"`
 	Services          []SvcMetric  `json:"services,omitempty"`
 	Temperatures      []TempMetric `json:"temperatures,omitempty"`
+	GatewayLatencyMs  *float64     `json:"gateway_latency_ms,omitempty"`
 }
 
 type DiskMetric struct {

@@ -33,6 +33,7 @@ func (s *Server) Routes() http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	r.Get("/api/agent/version", s.agentVersion)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/login", s.login)
@@ -565,6 +566,12 @@ func (s *Server) getAgentInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, inv)
+}
+
+func (s *Server) agentVersion(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"version": s.cfg.AgentReleaseVersion,
+	})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {

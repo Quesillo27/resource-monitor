@@ -26,10 +26,10 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 	var sampleAt time.Time
 	err = tx.QueryRow(ctx, `
 		INSERT INTO metric_samples
-			(agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent, swap_total_bytes, swap_used_bytes, swap_used_percent)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent, swap_total_bytes, swap_used_bytes, swap_used_percent, gateway_latency_ms)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id, captured_at
-	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent, int64(req.SwapTotalBytes), int64(req.SwapUsedBytes), req.SwapUsedPercent).Scan(&sampleID, &sampleAt)
+	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent, int64(req.SwapTotalBytes), int64(req.SwapUsedBytes), req.SwapUsedPercent, req.GatewayLatencyMs).Scan(&sampleID, &sampleAt)
 	if err != nil {
 		return err
 	}
@@ -266,6 +266,7 @@ func (s *Store) EnsureV31Schema(ctx context.Context) error {
 			temperature_c DOUBLE PRECISION NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS temperature_samples_agent_idx ON temperature_samples(agent_id, captured_at DESC)`,
+		`ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS gateway_latency_ms DOUBLE PRECISION`,
 	}
 	for _, stmt := range statements {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {

@@ -8,14 +8,15 @@ import (
 )
 
 type Config struct {
-	DatabaseURL         string
-	JWTSecret           string
-	AdminUsername       string
-	AdminPassword       string
-	ServerAddr          string
-	RetentionDays       int
-	OfflineAfterSeconds int
-	AllowedOrigins      []string
+	DatabaseURL          string
+	JWTSecret            string
+	AdminUsername        string
+	AdminPassword        string
+	ServerAddr           string
+	RetentionDays        int
+	OfflineAfterSeconds  int
+	AllowedOrigins       []string
+	AgentReleaseVersion  string
 }
 
 func Load() Config {
@@ -49,6 +50,7 @@ func Load() Config {
 		RetentionDays:       envInt("RETENTION_DAYS", 30),
 		OfflineAfterSeconds: envInt("OFFLINE_AFTER_SECONDS", 180),
 		AllowedOrigins:      filtered,
+		AgentReleaseVersion: env("AGENT_RELEASE_VERSION", "dev"),
 	}
 }
 

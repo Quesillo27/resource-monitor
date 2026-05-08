@@ -18,6 +18,8 @@ import (
 	"resource-monitor/agent/internal/collector"
 	"resource-monitor/agent/internal/config"
 	agentservice "resource-monitor/agent/internal/service"
+	"resource-monitor/agent/internal/updater"
+	"resource-monitor/agent/internal/version"
 )
 
 func main() {
@@ -98,6 +100,7 @@ func installCmd(args []string) {
 	}
 	fmt.Printf("resource monitor agent installed with config %s\n", path)
 	fmt.Printf("binary installed at %s\n", targetPath)
+	fmt.Printf("agent version %s\n", version.Version)
 }
 
 func uninstallCmd(args []string) {
@@ -152,8 +155,32 @@ func runCmd(args []string) {
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
 	go runInventoryLoop(ctx, loaded)
+	go runUpdateCheck(ctx, loaded.ServerURL)
 	if err := runLoop(ctx, loaded); err != nil {
 		log.Fatal(err)
+	}
+}
+
+func runUpdateCheck(ctx context.Context, serverURL string) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	check := func() {
+		latest, hasUpdate, err := updater.CheckLatest(ctx, serverURL, version.Version)
+		if err != nil {
+			return // silent — server may not yet expose the endpoint
+		}
+		if hasUpdate {
+			log.Printf("update available: current=%s latest=%s", version.Version, latest)
+		}
+	}
+	check() // immediate check on startup
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			check()
+		}
 	}
 }
 

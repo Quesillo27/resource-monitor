@@ -330,6 +330,13 @@ function ResourcesTab({ agent, history, disks: currentDisks = [], networks: curr
           <LineChart points={network} series={[["Recibido", "bytes_recv_per_sec", "#fb5b7b"], ["Enviado", "bytes_sent_per_sec", "#38a3ff"]]} formatter={rate} />
         </ChartPanel>
         <ChartPanel
+          title="Latencia al gateway"
+          subtitle="Latencia promedio al gateway por defecto"
+          unit="ms"
+        >
+          <LineChart points={metrics} series={[["Latencia GW", "gateway_latency_ms", "#f59e0b"]]} formatter={(v) => v != null ? `${Number(v).toFixed(1)} ms` : 'n/a'} />
+        </ChartPanel>
+        <ChartPanel
           title="Uso de disco por unidad o mount"
           subtitle="Porcentaje usado por filesystem"
           unit="%"

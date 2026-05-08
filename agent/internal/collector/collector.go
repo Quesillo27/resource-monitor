@@ -1,9 +1,13 @@
 package collector
 
 import (
+	"bytes"
 	"context"
+	"os/exec"
+	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +41,7 @@ type Metrics struct {
 	Processes         []ProcMetric `json:"processes,omitempty"`
 	Services          []SvcMetric  `json:"services,omitempty"`
 	Temperatures      []TempMetric `json:"temperatures,omitempty"`
+	GatewayLatencyMs  *float64     `json:"gateway_latency_ms,omitempty"`
 }
 
 type DiskMetric struct {
@@ -144,7 +149,99 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		metrics.Services = collectServices(ctx, serviceChecks)
 		metrics.Temperatures = collectTemperatures(ctx)
 	}
+	metrics.GatewayLatencyMs = measureGatewayLatency(ctx)
 	return metrics, nil
+}
+
+// detectDefaultGateway returns the IP of the default gateway, or "" if not found.
+func detectDefaultGateway() string {
+	switch runtime.GOOS {
+	case "linux":
+		out, err := exec.Command("ip", "route", "show", "default").Output()
+		if err != nil {
+			return ""
+		}
+		// "default via 192.168.1.1 dev eth0 ..."
+		re := regexp.MustCompile(`default via (\S+)`)
+		if m := re.FindSubmatch(out); len(m) >= 2 {
+			return string(m[1])
+		}
+	case "darwin":
+		out, err := exec.Command("netstat", "-rn").Output()
+		if err != nil {
+			return ""
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 && fields[0] == "default" {
+				return fields[1]
+			}
+		}
+	case "windows":
+		out, err := exec.Command("route", "print", "0.0.0.0").Output()
+		if err != nil {
+			return ""
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			fields := strings.Fields(line)
+			// Destination 0.0.0.0, mask 0.0.0.0, gateway at index 2
+			if len(fields) >= 3 && fields[0] == "0.0.0.0" && fields[1] == "0.0.0.0" {
+				return fields[2]
+			}
+		}
+	}
+	return ""
+}
+
+// measureGatewayLatency pings the default gateway and returns avg RTT in ms.
+// Returns nil silently on any error — never blocks the collection cycle.
+func measureGatewayLatency(ctx context.Context) *float64 {
+	gw := detectDefaultGateway()
+	if gw == "" {
+		return nil
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.CommandContext(pingCtx, "ping", "-n", "3", "-w", "1000", gw)
+	default:
+		cmd = exec.CommandContext(pingCtx, "ping", "-c", "3", "-W", "1", gw)
+	}
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	return parsePingAvg(out.String())
+}
+
+// parsePingAvg extracts the average RTT in ms from ping output.
+func parsePingAvg(output string) *float64 {
+	// Linux/macOS: "rtt min/avg/max/mdev = 0.123/0.456/0.789/0.100 ms"
+	// macOS older:  "round-trip min/avg/max/stddev = 0.123/0.456/0.789/0.100 ms"
+	reRTT := regexp.MustCompile(`(?:rtt|round-trip)[^=]+=\s*[\d.]+/([\d.]+)/`)
+	if m := reRTT.FindStringSubmatch(output); len(m) >= 2 {
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err == nil {
+			return &v
+		}
+	}
+	// Windows: "Average = 5ms"
+	reWin := regexp.MustCompile(`Average\s*=\s*([\d]+)\s*ms`)
+	if m := reWin.FindStringSubmatch(output); len(m) >= 2 {
+		v, err := strconv.ParseFloat(m[1], 64)
+		if err == nil {
+			return &v
+		}
+	}
+	return nil
 }
 
 func collectDisks(ctx context.Context) ([]DiskMetric, error) {

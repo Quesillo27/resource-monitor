@@ -277,7 +277,8 @@ func (s *Store) NotifyDueAlerts(ctx context.Context) error {
 func (s *Store) historyMetricsV3(ctx context.Context, agentID, window, bucket string) ([]map[string]any, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT date_bin($3::interval, captured_at, timestamptz '2000-01-01') AS bucket,
-		       avg(cpu_percent), avg(memory_used_percent), avg(swap_used_percent), max(captured_at)
+		       avg(cpu_percent), avg(memory_used_percent), avg(swap_used_percent), max(captured_at),
+		       avg(gateway_latency_ms)
 		FROM metric_samples
 		WHERE agent_id = $1 AND captured_at >= now() - $2::interval
 		GROUP BY bucket
@@ -291,10 +292,21 @@ func (s *Store) historyMetricsV3(ctx context.Context, agentID, window, bucket st
 	for rows.Next() {
 		var capturedAt, lastSeen time.Time
 		var cpu, memory, swap float64
-		if err := rows.Scan(&capturedAt, &cpu, &memory, &swap, &lastSeen); err != nil {
+		var gatewayLatency *float64
+		if err := rows.Scan(&capturedAt, &cpu, &memory, &swap, &lastSeen, &gatewayLatency); err != nil {
 			return nil, err
 		}
-		out = append(out, map[string]any{"captured_at": capturedAt, "last_sample_at": lastSeen, "cpu_percent": cpu, "memory_used_percent": memory, "swap_used_percent": swap})
+		row := map[string]any{
+			"captured_at":         capturedAt,
+			"last_sample_at":      lastSeen,
+			"cpu_percent":         cpu,
+			"memory_used_percent": memory,
+			"swap_used_percent":   swap,
+		}
+		if gatewayLatency != nil {
+			row["gateway_latency_ms"] = *gatewayLatency
+		}
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

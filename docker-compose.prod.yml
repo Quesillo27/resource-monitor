@@ -28,6 +28,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
       OFFLINE_AFTER_SECONDS: ${OFFLINE_AFTER_SECONDS:-180}
+      AGENT_RELEASE_VERSION: ${AGENT_RELEASE_VERSION:-v1.0.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,14 +43,16 @@ services:
       - ./agent:/src/agent:ro
       - ./scripts:/src/scripts:ro
       - agent-downloads:/downloads
+    environment:
+      AGENT_VERSION: ${AGENT_RELEASE_VERSION:-v1.0.0}
     command: >
       sh -c "apk add --no-cache git ca-certificates &&
       cp -R /src/agent/. /work/agent/ &&
       go mod tidy &&
-      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
-      GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
-      GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-darwin-amd64 ./cmd/agent &&
-      GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-darwin-arm64 ./cmd/agent &&
+      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=${AGENT_VERSION}\" -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
+      GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=${AGENT_VERSION}\" -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
+      GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=${AGENT_VERSION}\" -o /downloads/resource-monitor-agent-darwin-amd64 ./cmd/agent &&
+      GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=${AGENT_VERSION}\" -o /downloads/resource-monitor-agent-darwin-arm64 ./cmd/agent &&
       cd /downloads && sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe resource-monitor-agent-darwin-amd64 resource-monitor-agent-darwin-arm64 > checksums.txt &&
       cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
       cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&

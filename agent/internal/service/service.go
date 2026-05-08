@@ -8,6 +8,8 @@ import (
 	"resource-monitor/agent/internal/client"
 	"resource-monitor/agent/internal/collector"
 	"resource-monitor/agent/internal/config"
+	"resource-monitor/agent/internal/updater"
+	"resource-monitor/agent/internal/version"
 
 	"github.com/kardianos/service"
 )
@@ -92,6 +94,24 @@ func (p *program) run(ctx context.Context) {
 		cfg.IntervalSeconds = 60
 	}
 	go runInventoryLoop(ctx, cfg)
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		// immediate check on startup
+		if latest, has, err := updater.CheckLatest(ctx, cfg.ServerURL, version.Version); err == nil && has {
+			log.Printf("update available: current=%s latest=%s", version.Version, latest)
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if latest, has, err := updater.CheckLatest(ctx, cfg.ServerURL, version.Version); err == nil && has {
+					log.Printf("update available: current=%s latest=%s", version.Version, latest)
+				}
+			}
+		}
+	}()
 	ticker := time.NewTicker(time.Duration(cfg.IntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
