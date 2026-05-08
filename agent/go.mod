@@ -1,6 +1,6 @@
 module resource-monitor/agent
 
-go 1.23
+go 1.24
 
 require (
 	github.com/kardianos/service v1.2.2

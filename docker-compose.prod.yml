@@ -14,6 +14,8 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    networks:
+      - internal
 
   backend:
     build:
@@ -30,9 +32,11 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - internal
 
   agent-assets:
-    image: golang:1.23-alpine
+    image: golang:1.24-alpine
     working_dir: /work/agent
     volumes:
       - ./agent:/src/agent:ro
@@ -47,6 +51,8 @@ services:
       cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
       cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&
       chmod 0644 /downloads/*"
+    networks:
+      - internal
 
   frontend:
     build:
@@ -63,7 +69,28 @@ services:
       agent-assets:
         condition: service_completed_successfully
     restart: unless-stopped
+    networks:
+      - internal
+      - resource-monitor
+    labels:
+      - traefik.http.routers.resource-monitor-18-web.rule=Host(`monitor.toolscode.cloud`)
+      - traefik.http.routers.resource-monitor-18-web.entrypoints=web
+      - traefik.http.services.resource-monitor-18-web.loadbalancer.server.port=80
+      - traefik.http.routers.resource-monitor-18-web.service=resource-monitor-18-web
+      - traefik.http.routers.resource-monitor-18-web.middlewares=redirect-to-https@file
+      - traefik.http.routers.resource-monitor-18-websecure.rule=Host(`monitor.toolscode.cloud`)
+      - traefik.http.routers.resource-monitor-18-websecure.entrypoints=websecure
+      - traefik.http.services.resource-monitor-18-websecure.loadbalancer.server.port=80
+      - traefik.http.routers.resource-monitor-18-websecure.service=resource-monitor-18-websecure
+      - traefik.http.routers.resource-monitor-18-websecure.tls.certresolver=letsencrypt
+      - traefik.enable=true
 
 volumes:
   postgres-data:
   agent-downloads:
+
+networks:
+  internal:
+  resource-monitor:
+    name: resource-monitor
+    external: true
