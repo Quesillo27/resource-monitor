@@ -1181,28 +1181,34 @@ function AgentRulesTab({ api, agentId }) {
 function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
   return (
     <div className="rule-row">
-      <span className={`sev-badge ${rule.severity}`}>{rule.severity}</span>
-      {rule.source === 'agent' && <span className="rule-source">custom</span>}
-      <label className="rule-field">
-        <span>Umbral ({unit})</span>
-        <input type="number" min="0" step="any" value={rule.threshold} onChange={(e) => onChange('threshold', e.target.value)} />
-        {rule.current_value != null && <small className="rule-current">actual: {Number(rule.current_value).toFixed(1)}{unit}</small>}
-      </label>
-      <label className="rule-field">
-        <span>Duración</span>
-        <input type="number" min="1" max="20" value={rule.duration_samples} onChange={(e) => onChange('duration_samples', e.target.value)} />
-      </label>
-      <label className="rule-field">
-        <span>Cooldown (min)</span>
-        <input type="number" min="1" value={rule.cooldown_minutes} onChange={(e) => onChange('cooldown_minutes', e.target.value)} />
-      </label>
-      <label className="rule-toggle"><input type="checkbox" checked={!!rule.enabled} onChange={(e) => onChange('enabled', e.target.checked)} /> Activa</label>
-      <label className={`rule-toggle email ${smtpOk ? '' : 'disabled'}`} title={smtpOk ? '' : 'Configura SMTP primero'}>
-        <input type="checkbox" checked={!!rule.notify_email} disabled={!smtpOk} onChange={(e) => onChange('notify_email', e.target.checked)} /> Email
-      </label>
-      <label className={`rule-toggle telegram ${telegramOk ? '' : 'disabled'}`} title={telegramOk ? '' : 'Configura Telegram primero'}>
-        <input type="checkbox" checked={!!rule.notify_telegram} disabled={!telegramOk} onChange={(e) => onChange('notify_telegram', e.target.checked)} /> Telegram
-      </label>
+      <div className="rule-meta">
+        <span className={`sev-badge ${rule.severity}`}>{rule.severity}</span>
+        {rule.source === 'agent' && <span className="rule-source" title="Override personalizado para este equipo">custom</span>}
+      </div>
+      <div className="rule-fields">
+        <label className="rule-field">
+          <span>Umbral ({unit})</span>
+          <input type="number" min="0" step="any" value={rule.threshold} onChange={(e) => onChange('threshold', e.target.value)} />
+          {rule.current_value != null && <small className="rule-current">actual: {Number(rule.current_value).toFixed(1)}{unit}</small>}
+        </label>
+        <label className="rule-field">
+          <span>Duración</span>
+          <input type="number" min="1" max="20" value={rule.duration_samples} onChange={(e) => onChange('duration_samples', e.target.value)} />
+        </label>
+        <label className="rule-field">
+          <span>Cooldown (min)</span>
+          <input type="number" min="1" value={rule.cooldown_minutes} onChange={(e) => onChange('cooldown_minutes', e.target.value)} />
+        </label>
+      </div>
+      <div className="rule-toggles">
+        <label className="rule-toggle"><input type="checkbox" checked={!!rule.enabled} onChange={(e) => onChange('enabled', e.target.checked)} /> Activa</label>
+        <label className={`rule-toggle email ${smtpOk ? '' : 'disabled'}`} title={smtpOk ? '' : 'Configura SMTP primero'}>
+          <input type="checkbox" checked={!!rule.notify_email} disabled={!smtpOk} onChange={(e) => onChange('notify_email', e.target.checked)} /> Email
+        </label>
+        <label className={`rule-toggle telegram ${telegramOk ? '' : 'disabled'}`} title={telegramOk ? '' : 'Configura Telegram primero'}>
+          <input type="checkbox" checked={!!rule.notify_telegram} disabled={!telegramOk} onChange={(e) => onChange('notify_telegram', e.target.checked)} /> Telegram
+        </label>
+      </div>
     </div>
   );
 }
