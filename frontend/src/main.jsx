@@ -381,7 +381,7 @@ function AgentDetail({ api, agentId, onBack }) {
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span></div>
           <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
           <div className="tab-row">
-            {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
+            {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
           {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} />}
@@ -389,7 +389,8 @@ function AgentDetail({ api, agentId, onBack }) {
           {tab === 'network' && <NetworkTable networks={networks} />}
           {tab === 'processes' && <ProcessesTable processes={processes} />}
           {tab === 'services' && <ServicesTable services={services} />}
-          {tab === 'alerts' && <AlertList alerts={alerts} />}
+          {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
+          {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} />}
           {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} />}
           {tab === 'software' && <SoftwareTab software={inventory?.software} />}
         </>
@@ -1011,6 +1012,201 @@ function MiniAgentList({ agents, metric, empty = 'Sin datos' }) {
   return <div className="mini-list">{agents.map((agent) => <div key={agent.id}><strong>{agent.name}</strong><span>{metric ? percent(agent[metric]) : date(agent.last_metric_at)}</span></div>)}</div>;
 }
 
+const RULE_GROUPS = [
+  { metric: 'cpu', title: 'CPU', unit: '%', icon: Cpu },
+  { metric: 'ram', title: 'Memoria RAM', unit: '%', icon: MemoryStick },
+  { metric: 'network_recv_mbps', title: 'Red recibida', unit: 'Mbps', icon: Network },
+  { metric: 'network_sent_mbps', title: 'Red enviada', unit: 'Mbps', icon: Network },
+  { metric: 'agent_offline_minutes', title: 'Conexión perdida', unit: 'min', icon: ShieldAlert },
+];
+
+function AgentRulesTab({ api, agentId }) {
+  const [rules, setRules] = useState(null);
+  const [smtpOk, setSmtpOk] = useState(false);
+  const [telegramOk, setTelegramOk] = useState(false);
+  const [message, setMessage] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const loadAll = () => {
+    let alive = true;
+    Promise.all([
+      api.get(`/api/agents/${agentId}/alert-rules`),
+      api.get('/api/alert-settings/smtp'),
+      api.get('/api/settings/telegram'),
+    ]).then(([rulesData, smtp, tg]) => {
+      if (!alive) return;
+      setRules(rulesData.rules || []);
+      setSmtpOk(!!(smtp.enabled && smtp.host));
+      setTelegramOk(!!(tg.enabled && tg.chat_ids));
+    }).catch((e) => alive && setMessage({ type: 'err', text: 'Error cargando reglas: ' + e.message }));
+    return () => { alive = false; };
+  };
+
+  useEffect(loadAll, [agentId]);
+
+  if (!rules) return <Skeleton />;
+
+  const setRule = (id, key, value) =>
+    setRules((prev) => prev.map((r) => r.id === id ? { ...r, [key]: value } : r));
+
+  async function save() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const payload = rules.map((r) => ({
+        ...r,
+        threshold: parseFloat(r.threshold) || 0,
+        duration_samples: Math.max(1, parseInt(r.duration_samples, 10) || 2),
+        cooldown_minutes: Math.max(1, parseInt(r.cooldown_minutes, 10) || 30),
+      }));
+      const saved = await api.put(`/api/agents/${agentId}/alert-rules`, { rules: payload });
+      setRules(saved.rules || []);
+      setMessage({ type: 'ok', text: 'Reglas guardadas correctamente' });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error: ' + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function reset() {
+    if (!window.confirm('¿Restaurar reglas globales? Esto eliminará todas las personalizaciones de este equipo.')) return;
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api.post(`/api/agents/${agentId}/alert-rules/reset`, {});
+      const fresh = await api.get(`/api/agents/${agentId}/alert-rules`);
+      setRules(fresh.rules || []);
+      setMessage({ type: 'ok', text: 'Reglas restauradas a defaults globales' });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error: ' + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const diskRules = rules.filter((r) => r.metric === 'disk_used_percent');
+  const diskKeys = [...new Set(diskRules.map((r) => r.resource_key))];
+  const overrideCount = rules.filter((r) => r.source === 'agent').length;
+
+  return (
+    <Panel
+      title="Reglas de alertas"
+      action={
+        <div className="actions">
+          <IconButton icon={RefreshCw} label="Restaurar" onClick={reset} disabled={saving} />
+          <IconButton icon={Save} label={saving ? 'Guardando…' : 'Guardar reglas'} onClick={save} disabled={saving} />
+        </div>
+      }
+    >
+      <p className="panel-hint">
+        Personaliza umbrales y notificaciones para este equipo. Las reglas que no modifiques heredan los valores globales.
+        {overrideCount > 0 && <> · <strong>{overrideCount}</strong> regla{overrideCount !== 1 ? 's' : ''} personalizada{overrideCount !== 1 ? 's' : ''}.</>}
+      </p>
+
+      {!smtpOk && <p className="warn-inline">SMTP no configurado — actívalo en pestaña SMTP para usar notificaciones por email</p>}
+      {!telegramOk && <p className="warn-inline">Telegram no configurado — actívalo en pestaña Telegram para usar notificaciones</p>}
+
+      <div className="rules-grid">
+        {RULE_GROUPS.map((group) => {
+          const groupRules = rules.filter((r) => r.metric === group.metric).sort((a, b) => a.severity === 'critical' ? 1 : -1);
+          if (groupRules.length === 0) return null;
+          const Icon = group.icon;
+          return (
+            <article key={group.metric} className="rules-card">
+              <header className="rules-card-head"><Icon size={16} /><h3>{group.title}</h3></header>
+              {groupRules.map((rule) => (
+                <RuleRow key={rule.id} rule={rule} unit={group.unit} smtpOk={smtpOk} telegramOk={telegramOk} onChange={(k, v) => setRule(rule.id, k, v)} />
+              ))}
+            </article>
+          );
+        })}
+      </div>
+
+      {diskRules.length > 0 && (
+        <article className="rules-card rules-disk-card">
+          <header className="rules-card-head"><HardDrive size={16} /><h3>Discos por unidad / mount</h3></header>
+          <div className="table-wrap">
+            <table className="rules-disk-table">
+              <thead>
+                <tr>
+                  <th>Recurso</th>
+                  <th>Uso</th>
+                  <th>Warning</th>
+                  <th>Critical</th>
+                  <th>Activa</th>
+                  <th>Email</th>
+                  <th>Telegram</th>
+                </tr>
+              </thead>
+              <tbody>
+                {diskKeys.map((key) => {
+                  const warn = diskRules.find((r) => r.resource_key === key && r.severity === 'warning');
+                  const crit = diskRules.find((r) => r.resource_key === key && r.severity === 'critical');
+                  const usage = warn?.current_value ?? crit?.current_value;
+                  return (
+                    <tr key={key || 'default'}>
+                      <td className="rules-disk-key"><strong>{key || 'Default'}</strong></td>
+                      <td>{usage != null ? <span className="usage-pill">{Number(usage).toFixed(1)}%</span> : '—'}</td>
+                      <td><input type="number" min="0" max="100" value={warn?.threshold ?? ''} onChange={(e) => warn && setRule(warn.id, 'threshold', e.target.value)} disabled={!warn} /></td>
+                      <td><input type="number" min="0" max="100" value={crit?.threshold ?? ''} onChange={(e) => crit && setRule(crit.id, 'threshold', e.target.value)} disabled={!crit} /></td>
+                      <td>
+                        <input type="checkbox" checked={!!(warn?.enabled || crit?.enabled)} onChange={(e) => {
+                          if (warn) setRule(warn.id, 'enabled', e.target.checked);
+                          if (crit) setRule(crit.id, 'enabled', e.target.checked);
+                        }} />
+                      </td>
+                      <td><input type="checkbox" checked={!!crit?.notify_email} disabled={!smtpOk || !crit} title={smtpOk ? 'Notificar critical por email' : 'Configura SMTP primero'} onChange={(e) => crit && setRule(crit.id, 'notify_email', e.target.checked)} /></td>
+                      <td><input type="checkbox" checked={!!crit?.notify_telegram} disabled={!telegramOk || !crit} title={telegramOk ? 'Notificar critical por telegram' : 'Configura Telegram primero'} onChange={(e) => crit && setRule(crit.id, 'notify_telegram', e.target.checked)} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      )}
+
+      <footer className="rules-help">
+        <div><strong>Duración</strong><span>Muestras consecutivas sobre umbral antes de abrir alerta.</span></div>
+        <div><strong>Cooldown</strong><span>Minutos mínimos entre re-notificaciones del mismo canal.</span></div>
+        <div><strong>Source</strong><span>Reglas con badge "agent" están personalizadas para este equipo.</span></div>
+      </footer>
+
+      {message && <p className={`status-msg ${message.type}`}>{message.text}</p>}
+    </Panel>
+  );
+}
+
+function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
+  return (
+    <div className="rule-row">
+      <span className={`sev-badge ${rule.severity}`}>{rule.severity}</span>
+      {rule.source === 'agent' && <span className="rule-source">custom</span>}
+      <label className="rule-field">
+        <span>Umbral ({unit})</span>
+        <input type="number" min="0" step="any" value={rule.threshold} onChange={(e) => onChange('threshold', e.target.value)} />
+        {rule.current_value != null && <small className="rule-current">actual: {Number(rule.current_value).toFixed(1)}{unit}</small>}
+      </label>
+      <label className="rule-field">
+        <span>Duración</span>
+        <input type="number" min="1" max="20" value={rule.duration_samples} onChange={(e) => onChange('duration_samples', e.target.value)} />
+      </label>
+      <label className="rule-field">
+        <span>Cooldown (min)</span>
+        <input type="number" min="1" value={rule.cooldown_minutes} onChange={(e) => onChange('cooldown_minutes', e.target.value)} />
+      </label>
+      <label className="rule-toggle"><input type="checkbox" checked={!!rule.enabled} onChange={(e) => onChange('enabled', e.target.checked)} /> Activa</label>
+      <label className={`rule-toggle email ${smtpOk ? '' : 'disabled'}`} title={smtpOk ? '' : 'Configura SMTP primero'}>
+        <input type="checkbox" checked={!!rule.notify_email} disabled={!smtpOk} onChange={(e) => onChange('notify_email', e.target.checked)} /> Email
+      </label>
+      <label className={`rule-toggle telegram ${telegramOk ? '' : 'disabled'}`} title={telegramOk ? '' : 'Configura Telegram primero'}>
+        <input type="checkbox" checked={!!rule.notify_telegram} disabled={!telegramOk} onChange={(e) => onChange('notify_telegram', e.target.checked)} /> Telegram
+      </label>
+    </div>
+  );
+}
+
 function AlertList({ alerts, compact = false, api = null, onChange = null }) {
   if (!alerts.length) return <p className="empty-panel">Sin alertas activas ✓</p>;
   async function markSeen(id) {
@@ -1435,7 +1631,7 @@ function sortBy(items, score) {
 }
 
 function tabLabel(item) {
-  return ({ summary: 'Resumen', resources: 'Recursos', disks: 'Discos', network: 'Red', processes: 'Procesos', services: 'Servicios', alerts: 'Alertas', hardware: 'Hardware', software: 'Software' })[item] || item;
+  return ({ summary: 'Resumen', resources: 'Recursos', disks: 'Discos', network: 'Red', processes: 'Procesos', services: 'Servicios', alerts: 'Alertas', rules: 'Reglas', hardware: 'Hardware', software: 'Software' })[item] || item;
 }
 
 function round(value) {
