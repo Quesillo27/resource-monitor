@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
 	"resource-monitor/backend/internal/models"
@@ -47,7 +48,9 @@ func (s *Store) EvaluateOfflineAlerts(ctx context.Context, offlineAfterSeconds i
 			return err
 		}
 	}
-	_ = s.NotifyDueAlertsV31(ctx)
+	if err := s.NotifyDueAlertsV31(ctx); err != nil {
+		log.Printf("notify due alerts: %v", err)
+	}
 	return nil
 }
 

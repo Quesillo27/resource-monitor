@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -164,11 +165,14 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 	}
 	smtpCfg, smtpErr := s.GetSMTPSettings(ctx)
 	telegramCfg, telegramErr := s.GetTelegramSettings(ctx)
-	if smtpErr != nil {
+	if smtpErr != nil && telegramErr != nil {
 		return smtpErr
 	}
+	if smtpErr != nil {
+		smtpCfg = models.SMTPSettings{}
+	}
 	if telegramErr != nil {
-		return telegramErr
+		telegramCfg = models.TelegramSettings{}
 	}
 	if strings.TrimSpace(smtpCfg.FromAddress) == "" {
 		smtpCfg.FromAddress = strings.TrimSpace(smtpCfg.Username)
@@ -217,17 +221,15 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		}
 		if alert.NotifyEmail && smtpCfg.Enabled && strings.TrimSpace(smtpCfg.Host) != "" && strings.TrimSpace(smtpCfg.ToAddresses) != "" && strings.TrimSpace(smtpCfg.FromAddress) != "" {
 			if err := sendAlertHTMLMailV32(smtpCfg, alert, processes); err != nil {
-				return err
-			}
-			if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+				log.Printf("alert email send failed for %s: %v", alert.ID, err)
+			} else if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.ID); err != nil {
 				return err
 			}
 		}
 		if alert.NotifyTelegram && telegramCfg.Enabled && strings.TrimSpace(telegramCfg.BotToken) != "" && strings.TrimSpace(telegramCfg.ChatIDs) != "" {
 			if err := sendTelegramV32(telegramCfg, telegramAlertTextV32(alert, processes)); err != nil {
-				return err
-			}
-			if _, err := s.pool.Exec(ctx, "UPDATE alerts SET telegram_notified_at = now(), telegram_notification_count = telegram_notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+				log.Printf("alert telegram send failed for %s: %v", alert.ID, err)
+			} else if _, err := s.pool.Exec(ctx, "UPDATE alerts SET telegram_notified_at = now(), telegram_notification_count = telegram_notification_count + 1 WHERE id = $1", alert.ID); err != nil {
 				return err
 			}
 		}
