@@ -196,27 +196,24 @@ function useSparkline(agentId, api) {
 function AgentRow({ agent, api, onSelect }) {
   const { data: sparkPoints, load } = useSparkline(agent.id, api);
   const sparkColor = agent.status === 'critical' ? '#ef4444' : agent.status === 'warning' ? '#f59e0b' : '#3b82f6';
+  const alerts = agent.active_alerts ?? 0;
   return (
-    <tr onMouseEnter={load} style={{ cursor: 'pointer' }} onClick={() => onSelect(agent.id)}>
-      <td><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
+    <tr onMouseEnter={load} className="agent-row" onClick={() => onSelect(agent.id)}>
+      <td className="agent-cell-name"><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
       <td><Status status={agent.status} /></td>
-      <td>{agent.os}</td>
+      <td className="agent-cell-os">{agent.os}</td>
       <td>{percent(agent.cpu_percent)}</td>
       <td>{percent(agent.memory_used_percent)}</td>
       <td>{agent.disk_count ?? 0}</td>
-      <td>{agent.active_alerts ?? 0}</td>
+      <td>{alerts > 0 ? <span className="alert-count">{alerts}</span> : <span className="text-muted">0</span>}</td>
       <td>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
-          {(agent.tags || []).map((t) => (
-            <span key={t} style={{ background: '#1d4ed8', color: '#bfdbfe', borderRadius: '3px', padding: '1px 5px', fontSize: '11px', whiteSpace: 'nowrap' }}>{t}</span>
-          ))}
+        <div className="tag-cell">
+          {(agent.tags || []).map((t) => <span key={t} className="agent-tag">{t}</span>)}
         </div>
       </td>
-      <td>{date(agent.last_metric_at)}</td>
-      <td>{date(agent.last_seen_at)}</td>
-      <td style={{ width: 90 }}>
-        <Sparkline points={sparkPoints} color={sparkColor} />
-      </td>
+      <td className="text-muted">{date(agent.last_metric_at)}</td>
+      <td className="text-muted">{date(agent.last_seen_at)}</td>
+      <td className="agent-cell-spark"><Sparkline points={sparkPoints} color={sparkColor} /></td>
     </tr>
   );
 }
@@ -255,15 +252,13 @@ function Agents({ api, onSelect }) {
             </button>
           ))}
           {availableTags.length > 0 && (
-            <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}
-              style={{marginLeft:'8px',background:'#1e293b',color:'inherit',border:'1px solid #334155',borderRadius:'6px',padding:'4px 8px',fontSize:'13px',cursor:'pointer'}}>
+            <select className="filter-select" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
               <option value="">Todos los grupos</option>
               {availableTags.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           )}
           {osOptions.length > 1 && (
-            <select value={osFilter} onChange={(e) => setOsFilter(e.target.value)}
-              style={{marginLeft:'8px',background:'#1e293b',color:'inherit',border:'1px solid #334155',borderRadius:'6px',padding:'4px 8px',fontSize:'13px',cursor:'pointer'}}>
+            <select className="filter-select" value={osFilter} onChange={(e) => setOsFilter(e.target.value)}>
               <option value="">Todos los OS</option>
               {osOptions.map((os) => <option key={os} value={os}>{os}</option>)}
             </select>
@@ -314,18 +309,15 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
   };
 
   return (
-    <div style={{display:'flex',flexWrap:'wrap',gap:'6px',alignItems:'center',margin:'8px 0'}}>
+    <div className="agent-tags">
       {tags.map((t) => (
-        <span key={t} style={{background:'#1d4ed8',color:'#bfdbfe',borderRadius:'4px',padding:'2px 8px',fontSize:'12px',cursor:'pointer',userSelect:'none'}}
-          onClick={() => removeTag(t)} title="Click para eliminar">
-          {t} &times;
+        <span key={t} className="agent-tag removable" onClick={() => removeTag(t)} title="Click para eliminar">
+          {t} <span aria-hidden>×</span>
         </span>
       ))}
-      <input value={input} onChange={(e) => setInput(e.target.value)}
+      <input className="agent-tag-input" value={input} onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
-        placeholder="+ tag" disabled={saving}
-        style={{border:'1px solid #4b5563',background:'transparent',color:'inherit',
-          borderRadius:'4px',padding:'2px 8px',fontSize:'12px',width:'80px',outline:'none'}} />
+        placeholder="+ tag" disabled={saving} />
     </div>
   );
 }
@@ -511,20 +503,34 @@ function Enrollment({ api }) {
 
   async function createToken(event) {
     event.preventDefault();
-    setLoading(true);
     setError('');
+    const trimmedServer = serverUrl.trim();
+    if (!trimmedServer) {
+      setError('La URL del servidor API es obligatoria');
+      return;
+    }
+    if (!/^https?:\/\//i.test(trimmedServer)) {
+      setError('La URL del servidor debe iniciar con http:// o https://');
+      return;
+    }
+    const intervalNum = Number(interval);
+    if (!intervalNum || intervalNum < 30 || intervalNum > 3600) {
+      setError('El intervalo debe estar entre 30 y 3600 segundos');
+      return;
+    }
+    setLoading(true);
     try {
       const data = await api.post('/api/enrollment-tokens', {
         name: agentName || 'Alta agente',
         ttl_hours: Number(ttl),
-        server_url: serverUrl,
-        download_url: downloadUrl,
-        agent_name: agentName,
+        server_url: trimmedServer,
+        download_url: downloadUrl.trim(),
+        agent_name: agentName.trim(),
         install_style: platform,
         release_version: 'latest',
         profile,
-        services,
-        interval: Number(interval),
+        services: services.trim(),
+        interval: intervalNum,
       });
       setResult(data);
     } catch (err) {
