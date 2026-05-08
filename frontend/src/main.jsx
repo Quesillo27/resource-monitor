@@ -8,6 +8,7 @@ import {
   Copy,
   Cpu,
   Edit3,
+  Eye,
   Gauge,
   HardDrive,
   KeyRound,
@@ -740,7 +741,26 @@ function AlertTimeline({ api }) {
 
 function Alerts({ api }) {
   const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts'), [], REFRESH_MS);
-  return <Panel title="Alertas web" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}><AlertList alerts={data?.alerts || []} /></Panel>;
+  const alerts = data?.alerts || [];
+  const unseenCount = alerts.filter((a) => !a.seen_at).length;
+  async function markAll() {
+    if (!unseenCount) return;
+    await api.post('/api/alerts/seen-all', {});
+    reload();
+  }
+  return (
+    <Panel
+      title={`Alertas activas${unseenCount ? ` · ${unseenCount} sin ver` : ''}`}
+      action={
+        <div className="actions">
+          {unseenCount > 0 && <IconButton icon={Eye} label="Marcar todas vistas" onClick={markAll} />}
+          <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />
+        </div>
+      }
+    >
+      <AlertList alerts={alerts} api={api} onChange={reload} />
+    </Panel>
+  );
 }
 
 function SMTPSettings({ api }) {
@@ -991,16 +1011,43 @@ function MiniAgentList({ agents, metric, empty = 'Sin datos' }) {
   return <div className="mini-list">{agents.map((agent) => <div key={agent.id}><strong>{agent.name}</strong><span>{metric ? percent(agent[metric]) : date(agent.last_metric_at)}</span></div>)}</div>;
 }
 
-function AlertList({ alerts, compact = false }) {
+function AlertList({ alerts, compact = false, api = null, onChange = null }) {
   if (!alerts.length) return <p className="empty-panel">Sin alertas activas ✓</p>;
+  async function markSeen(id) {
+    if (!api) return;
+    await api.post(`/api/alerts/${id}/seen`, {});
+    onChange && onChange();
+  }
+  const fmt = (v, u) => v == null ? '—' : `${Number(v).toFixed(1)}${(u || '').trim()}`;
   return (
     <div className={`alert-list ${compact ? 'compact' : ''}`}>
       {alerts.map((alert) => (
-        <article className={`alert-card sev-${alert.severity}`} key={alert.id}>
+        <article className={`alert-card sev-${alert.severity} ${alert.seen_at ? 'is-seen' : ''}`} key={alert.id}>
           <AlertTriangle size={18} />
-          <div>
-            <strong>{alert.message}</strong>
-            <span>{alert.agent_name} · <span className={`sev-badge ${alert.severity}`}>{alert.severity}</span> · {date(alert.opened_at)}</span>
+          <div className="alert-body">
+            <div className="alert-headline">
+              <span className={`sev-badge ${alert.severity}`}>{alert.severity}</span>
+              <strong>{alert.agent_name}</strong>
+              {alert.resource_key && <span className="alert-resource">{alert.resource_key}</span>}
+              {!alert.active && <span className="sev-badge resolved">resuelta</span>}
+              {alert.seen_at && <span className="sev-badge seen">vista</span>}
+            </div>
+            <p className="alert-message">{alert.message}</p>
+            {(alert.observed_value != null || alert.threshold_value != null) && (
+              <div className="alert-values">
+                <span>Valor: <strong>{fmt(alert.observed_value, alert.unit)}</strong></span>
+                <span>Umbral: <strong>{fmt(alert.threshold_value, alert.unit)}</strong></span>
+                {alert.duration_samples > 0 && <span>Muestras: <strong>{alert.duration_samples}</strong></span>}
+              </div>
+            )}
+            <div className="alert-meta">
+              <span>{timeAgo(alert.opened_at)}</span>
+              {alert.notify_email && <span title="Notifica por email">· ✉ email</span>}
+              {alert.notify_telegram && <span title="Notifica por telegram">· ✈ telegram</span>}
+              {api && !alert.seen_at && (
+                <button className="link-btn" onClick={() => markSeen(alert.id)}>Marcar vista</button>
+              )}
+            </div>
           </div>
         </article>
       ))}

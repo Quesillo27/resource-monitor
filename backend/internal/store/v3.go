@@ -198,6 +198,12 @@ func (s *Store) SaveSMTPSettings(ctx context.Context, settings models.SMTPSettin
 	if settings.CooldownMinutes <= 0 {
 		settings.CooldownMinutes = 30
 	}
+	// Preserve current password if empty (frontend never sends it for security)
+	if strings.TrimSpace(settings.Password) == "" {
+		if current, err := s.GetSMTPSettings(ctx); err == nil {
+			settings.Password = current.Password
+		}
+	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO smtp_settings (id, enabled, host, port, username, password, from_address, to_addresses, use_tls, use_starttls, cooldown_minutes, updated_at)
 		VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())

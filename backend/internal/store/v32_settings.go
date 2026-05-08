@@ -206,6 +206,12 @@ func (s *Store) SaveTelegramSettings(ctx context.Context, settings models.Telegr
 	if settings.CooldownMinutes <= 0 {
 		settings.CooldownMinutes = 30
 	}
+	// Preserve current bot_token if empty (frontend never sends it for security)
+	if strings.TrimSpace(settings.BotToken) == "" {
+		if current, err := s.GetTelegramSettings(ctx); err == nil {
+			settings.BotToken = current.BotToken
+		}
+	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO telegram_settings (id, enabled, bot_token, chat_ids, parse_mode, cooldown_minutes, updated_at)
 		VALUES (1, $1, $2, $3, $4, $5, now())

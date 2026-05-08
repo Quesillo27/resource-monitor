@@ -1031,6 +1031,20 @@ label span {
 .alert-card strong { display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); }
 .alert-card > div > span { color: var(--text-secondary); font-size: 12px; margin-top: 3px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 
+.alert-card.is-seen { opacity: 0.65; }
+.alert-body { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.alert-headline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.alert-headline strong { display: inline; font-size: 13px; }
+.alert-resource { font-size: 11px; color: var(--text-muted); background: var(--surface-2, #f1f5f9); padding: 2px 6px; border-radius: 4px; font-family: ui-monospace, monospace; }
+.alert-message { margin: 0; font-size: 13px; color: var(--text-primary); }
+.alert-values { display: flex; gap: 14px; font-size: 12px; color: var(--text-secondary); flex-wrap: wrap; }
+.alert-values strong { display: inline; color: var(--text-primary); font-weight: 600; }
+.alert-meta { display: flex; gap: 8px; font-size: 11px; color: var(--text-muted); align-items: center; flex-wrap: wrap; }
+.sev-badge.resolved { background: #e0f2fe; color: #075985; }
+.sev-badge.seen { background: #ecfdf5; color: #065f46; }
+.link-btn { background: none; border: none; padding: 0; color: var(--accent, #2563eb); font-size: 11px; cursor: pointer; text-decoration: underline; margin-left: auto; }
+.link-btn:hover { color: #1d4ed8; }
+
 /* ── Empty states ── */
 .empty, .empty-panel, .empty-chart { color: var(--text-muted); text-align: center; }
 .empty-panel, .empty-chart { padding: 32px 24px; }

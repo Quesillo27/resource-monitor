@@ -33,6 +33,7 @@ func main() {
 	api := httpapi.NewServer(cfg, db)
 	go runRetention(ctx, db, cfg.RetentionDays)
 	go runOfflineAlerts(ctx, db, cfg.OfflineAfterSeconds)
+	go runAlertDispatcher(ctx, db)
 
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
@@ -79,6 +80,22 @@ func runOfflineAlerts(ctx context.Context, db *store.Store, offlineAfterSeconds 
 	for {
 		if err := db.EvaluateOfflineAlerts(ctx, offlineAfterSeconds); err != nil {
 			log.Printf("offline alert evaluation: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func runAlertDispatcher(ctx context.Context, db *store.Store) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		if err := db.NotifyDueAlertsV31(ctx); err != nil {
+			log.Printf("alert dispatch: %v", err)
 		}
 		select {
 		case <-ctx.Done():

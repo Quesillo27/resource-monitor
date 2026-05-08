@@ -574,7 +574,6 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "metrics failed")
 		return
 	}
-	_ = s.store.NotifyDueAlertsV31(r.Context())
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
 }
 
