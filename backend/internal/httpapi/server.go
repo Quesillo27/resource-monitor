@@ -86,6 +86,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/agent/heartbeat", s.heartbeat)
 			r.Post("/agent/metrics", s.metrics)
 			r.Post("/agent/inventory", s.agentInventory)
+			r.Post("/agent/offline", s.agentOfflineNotice)
 		})
 	})
 
@@ -602,6 +603,21 @@ func (s *Server) agentInventory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "accepted"})
+}
+
+// agentOfflineNotice marca un agente como offline inmediatamente cuando
+// avisa shutdown limpio (en lugar de esperar OFFLINE_AFTER_SECONDS).
+func (s *Server) agentOfflineNotice(w http.ResponseWriter, r *http.Request) {
+	agentID, _ := r.Context().Value(agentIDKey{}).(string)
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	_ = decodeJSON(w, r, &req)
+	if err := s.store.MarkAgentOffline(r.Context(), agentID, req.Reason); err != nil {
+		writeError(w, http.StatusInternalServerError, "offline notice failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "offline"})
 }
 
 func (s *Server) getAgentInventory(w http.ResponseWriter, r *http.Request) {

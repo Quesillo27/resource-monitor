@@ -3,12 +3,16 @@ package collector
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os/exec"
 	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -21,11 +25,12 @@ import (
 )
 
 type Host struct {
-	Name          string `json:"name"`
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
-	UptimeSeconds uint64 `json:"uptime_seconds"`
+	Name           string `json:"name"`
+	Hostname       string `json:"hostname"`
+	OS             string `json:"os"`
+	Arch           string `json:"arch"`
+	UptimeSeconds  uint64 `json:"uptime_seconds"`
+	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
 }
 
 type Metrics struct {
@@ -55,10 +60,12 @@ type DiskMetric struct {
 }
 
 type NetMetric struct {
-	Name      string `json:"name"`
-	BytesSent uint64 `json:"bytes_sent"`
-	BytesRecv uint64 `json:"bytes_recv"`
-	Up        bool   `json:"up"`
+	Name      string  `json:"name"`
+	BytesSent uint64  `json:"bytes_sent"`
+	BytesRecv uint64  `json:"bytes_recv"`
+	Up        bool    `json:"up"`
+	SentMbps  float64 `json:"sent_mbps,omitempty"`
+	RecvMbps  float64 `json:"recv_mbps,omitempty"`
 }
 
 type ProcMetric struct {
@@ -74,8 +81,8 @@ type SvcMetric struct {
 }
 
 type TempMetric struct {
-	SensorKey     string  `json:"sensor_key"`
-	TemperatureC  float64 `json:"temperature_c"`
+	SensorKey    string  `json:"sensor_key"`
+	TemperatureC float64 `json:"temperature_c"`
 }
 
 type SoftwareItem struct {
@@ -89,21 +96,32 @@ type Inventory struct {
 	Software []SoftwareItem `json:"software"`
 }
 
+// agentStartedAt registra el inicio del proceso para reportar uptime del
+// agente (separado del uptime del host).
+var agentStartedAt = time.Now()
+
 func HostInfo() (Host, error) {
 	info, err := host.Info()
 	if err != nil {
 		return Host{}, err
 	}
 	return Host{
-		Name:          info.Hostname,
-		Hostname:      info.Hostname,
-		OS:            info.Platform + " " + info.PlatformVersion,
-		Arch:          runtime.GOARCH,
-		UptimeSeconds: info.Uptime,
+		Name:           info.Hostname,
+		Hostname:       info.Hostname,
+		OS:             info.Platform + " " + info.PlatformVersion,
+		Arch:           runtime.GOARCH,
+		UptimeSeconds:  info.Uptime,
+		AgentUptimeSec: uint64(time.Since(agentStartedAt).Seconds()),
 	}, nil
 }
 
+// Collect recolecta todas las métricas del sistema. Tiene un timeout interno
+// de 45 s para evitar que un syscall colgado en gopsutil (sensors, WMI,
+// disk) trabe el ciclo del agente.
 func Collect(ctx context.Context, profile string, serviceChecks []string) (Metrics, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+
 	cpuValues, err := cpu.PercentWithContext(ctx, time.Second, false)
 	if err != nil {
 		return Metrics{}, err
@@ -139,15 +157,18 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		SwapUsedPercent:   swapPercent,
 		Disks:             disks,
 	}
-	if profile == "balanced" || profile == "" {
-		metrics.Networks = collectNetworks(ctx)
-		metrics.Processes = collectTopProcesses(ctx, 10)
-		metrics.Services = collectServices(ctx, serviceChecks)
-	} else if profile == "full" {
+	switch profile {
+	case "minimal":
+		// solo CPU/RAM/disk
+	case "full":
 		metrics.Networks = collectNetworks(ctx)
 		metrics.Processes = collectTopProcesses(ctx, 20)
 		metrics.Services = collectServices(ctx, serviceChecks)
 		metrics.Temperatures = collectTemperatures(ctx)
+	default: // balanced
+		metrics.Networks = collectNetworks(ctx)
+		metrics.Processes = collectTopProcesses(ctx, 10)
+		metrics.Services = collectServices(ctx, serviceChecks)
 	}
 	metrics.GatewayLatencyMs = measureGatewayLatency(ctx)
 	return metrics, nil
@@ -244,6 +265,37 @@ func parsePingAvg(output string) *float64 {
 	return nil
 }
 
+// pseudoFilesystems agrupa filesystems virtuales que no aportan info útil
+// (snaps, tmpfs, cgroup, overlay) y solo inflan el reporte de discos.
+var pseudoFilesystems = map[string]bool{
+	"tmpfs":       true,
+	"devtmpfs":    true,
+	"proc":        true,
+	"sysfs":       true,
+	"cgroup":      true,
+	"cgroup2":     true,
+	"squashfs":    true,
+	"overlay":     true,
+	"overlay2":    true,
+	"mqueue":      true,
+	"pstore":      true,
+	"bpf":         true,
+	"tracefs":     true,
+	"debugfs":     true,
+	"securityfs":  true,
+	"hugetlbfs":   true,
+	"binfmt_misc": true,
+	"autofs":      true,
+	"fusectl":     true,
+	"efivarfs":    true,
+	"ramfs":       true,
+	"devpts":      true,
+	"configfs":    true,
+	"selinuxfs":   true,
+	"nsfs":        true,
+	"none":        true,
+}
+
 func collectDisks(ctx context.Context) ([]DiskMetric, error) {
 	partitions, err := disk.PartitionsWithContext(ctx, false)
 	if err != nil {
@@ -252,13 +304,27 @@ func collectDisks(ctx context.Context) ([]DiskMetric, error) {
 	result := []DiskMetric{}
 	seen := map[string]bool{}
 	for _, partition := range partitions {
-		key := partition.Mountpoint
-		if seen[key] {
+		fstype := strings.ToLower(partition.Fstype)
+		if pseudoFilesystems[fstype] {
 			continue
 		}
-		seen[key] = true
+		// snap loops, contenedores docker overlay, esnaps en /var/lib/snapd
+		if strings.HasPrefix(partition.Mountpoint, "/snap/") ||
+			strings.HasPrefix(partition.Mountpoint, "/var/lib/docker/") ||
+			strings.HasPrefix(partition.Mountpoint, "/var/lib/containers/") ||
+			strings.HasPrefix(partition.Mountpoint, "/run/") {
+			continue
+		}
+		if seen[partition.Mountpoint] {
+			continue
+		}
+		seen[partition.Mountpoint] = true
 		usage, err := disk.UsageWithContext(ctx, partition.Mountpoint)
 		if err != nil {
+			continue
+		}
+		// descartar discos sin capacidad (montajes vacíos)
+		if usage.Total == 0 {
 			continue
 		}
 		result = append(result, DiskMetric{
@@ -273,6 +339,19 @@ func collectDisks(ctx context.Context) ([]DiskMetric, error) {
 	}
 	return result, nil
 }
+
+// netSnapshot guarda el último snapshot de contadores por interfaz para
+// calcular Mbps entre ciclos.
+type netSnapshot struct {
+	at        time.Time
+	bytesSent uint64
+	bytesRecv uint64
+}
+
+var (
+	netSnapshotMu sync.Mutex
+	netSnapshots  = map[string]netSnapshot{}
+)
 
 func collectNetworks(ctx context.Context) []NetMetric {
 	counters, err := gnet.IOCountersWithContext(ctx, true)
@@ -289,42 +368,91 @@ func collectNetworks(ctx context.Context) []NetMetric {
 			}
 		}
 	}
+
+	now := time.Now()
+	netSnapshotMu.Lock()
+	defer netSnapshotMu.Unlock()
+
 	result := []NetMetric{}
 	for _, counter := range counters {
 		if strings.HasPrefix(counter.Name, "lo") {
 			continue
 		}
-		result = append(result, NetMetric{
+		metric := NetMetric{
 			Name:      counter.Name,
 			BytesSent: counter.BytesSent,
 			BytesRecv: counter.BytesRecv,
 			Up:        up[counter.Name],
-		})
+		}
+		if prev, ok := netSnapshots[counter.Name]; ok {
+			elapsed := now.Sub(prev.at).Seconds()
+			if elapsed > 0 && counter.BytesSent >= prev.bytesSent && counter.BytesRecv >= prev.bytesRecv {
+				metric.SentMbps = float64(counter.BytesSent-prev.bytesSent) * 8 / 1_000_000 / elapsed
+				metric.RecvMbps = float64(counter.BytesRecv-prev.bytesRecv) * 8 / 1_000_000 / elapsed
+			}
+		}
+		netSnapshots[counter.Name] = netSnapshot{
+			at:        now,
+			bytesSent: counter.BytesSent,
+			bytesRecv: counter.BytesRecv,
+		}
+		result = append(result, metric)
 	}
 	return result
 }
+
+// procCache guarda objetos *process.Process entre ciclos. gopsutil calcula
+// CPUPercent como delta entre llamadas al MISMO Process; sin caché, cada
+// ciclo crea procs nuevos y CPUPercent siempre es 0 o irreal.
+var (
+	procCacheMu sync.Mutex
+	procCache   = map[int32]*process.Process{}
+)
 
 func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 	procs, err := process.ProcessesWithContext(ctx)
 	if err != nil {
 		return nil
 	}
-	numCPU := float64(runtime.NumCPU())
+
+	procCacheMu.Lock()
+	defer procCacheMu.Unlock()
+
+	live := map[int32]bool{}
 	result := []ProcMetric{}
+	numCPU := float64(runtime.NumCPU())
+
 	for _, proc := range procs {
-		name, err := proc.NameWithContext(ctx)
+		live[proc.Pid] = true
+		// usar el cacheado si existe (para que gopsutil tenga muestra previa)
+		cached, hit := procCache[proc.Pid]
+		if !hit {
+			procCache[proc.Pid] = proc
+			cached = proc
+		}
+
+		name, err := cached.NameWithContext(ctx)
 		if err != nil || name == "" {
 			continue
 		}
-		cpuPercent, _ := proc.CPUPercentWithContext(ctx)
-		memPercent, _ := proc.MemoryPercentWithContext(ctx)
+		cpuPercent, _ := cached.CPUPercentWithContext(ctx)
+		memPercent, _ := cached.MemoryPercentWithContext(ctx)
+
+		// gopsutil en Linux devuelve CPU% como suma de cores (puede pasar 100%);
+		// en Windows ya viene normalizado por core. Solo dividir en Linux.
+		if runtime.GOOS == "linux" && numCPU > 1 {
+			cpuPercent = cpuPercent / numCPU
+		}
+
+		// si NO había caché previo, esta primera muestra es 0 — se descarta
+		// pero queda guardado el Process para que el próximo ciclo sí mida.
+		if !hit && cpuPercent == 0 && memPercent == 0 {
+			continue
+		}
 		if cpuPercent <= 0 && memPercent <= 0 {
 			continue
 		}
-		// Normalize CPU to system-relative % (gopsutil returns per-core %)
-		if numCPU > 1 {
-			cpuPercent = cpuPercent / numCPU
-		}
+
 		result = append(result, ProcMetric{
 			PID:           proc.Pid,
 			Name:          name,
@@ -332,6 +460,14 @@ func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 			MemoryPercent: memPercent,
 		})
 	}
+
+	// purgar procesos muertos del cache para no crecer indefinidamente
+	for pid := range procCache {
+		if !live[pid] {
+			delete(procCache, pid)
+		}
+	}
+
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].CPUPercent+float64(result[i].MemoryPercent) > result[j].CPUPercent+float64(result[j].MemoryPercent)
 	})
@@ -345,6 +481,7 @@ func collectServices(ctx context.Context, checks []string) []SvcMetric {
 	if len(checks) == 0 {
 		return nil
 	}
+	// fallback: tabla de procesos en ejecución por nombre
 	procs, _ := process.ProcessesWithContext(ctx)
 	running := map[string]bool{}
 	for _, proc := range procs {
@@ -359,9 +496,15 @@ func collectServices(ctx context.Context, checks []string) []SvcMetric {
 		if check == "" {
 			continue
 		}
-		status := "stopped"
-		if running[strings.ToLower(check)] {
-			status = "running"
+		// 1) intentar SCM (Windows) o systemctl (Linux)
+		status := detectServiceStatus(ctx, check)
+		// 2) fallback por nombre de proceso si el OS no respondió
+		if status == "" {
+			if running[strings.ToLower(check)] {
+				status = "running"
+			} else {
+				status = "stopped"
+			}
 		}
 		result = append(result, SvcMetric{Name: check, Status: status})
 	}
@@ -386,4 +529,15 @@ func collectTemperatures(ctx context.Context) []TempMetric {
 		return nil
 	}
 	return result
+}
+
+// InventoryFingerprint genera un hash estable del inventario actual, para
+// detectar cambios y triggear envío fuera del ciclo de 24h.
+func InventoryFingerprint(inv Inventory) string {
+	payload, err := json.Marshal(inv)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
 }

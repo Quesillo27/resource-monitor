@@ -2,11 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -15,11 +16,12 @@ import (
 	"strings"
 	"time"
 
+	"resource-monitor/agent/internal/buffer"
 	"resource-monitor/agent/internal/client"
 	"resource-monitor/agent/internal/collector"
 	"resource-monitor/agent/internal/config"
+	agentruntime "resource-monitor/agent/internal/runtime"
 	agentservice "resource-monitor/agent/internal/service"
-	"resource-monitor/agent/internal/updater"
 	"resource-monitor/agent/internal/version"
 )
 
@@ -46,6 +48,8 @@ func main() {
 		doctorCmd(os.Args[2:])
 	case "status":
 		statusCmd(os.Args[2:])
+	case "version":
+		fmt.Printf("resource-monitor-agent %s (%s/%s)\n", version.Version, runtime.GOOS, runtime.GOARCH)
 	default:
 		runCmd(os.Args[1:])
 	}
@@ -62,6 +66,10 @@ func installCmd(args []string) {
 	}
 	if cfg.IntervalSeconds <= 0 {
 		cfg.IntervalSeconds = 60
+	}
+	if cfg.IntervalSeconds < config.MinIntervalSeconds {
+		log.Printf("warning: interval %ds below minimum, raising to %ds", cfg.IntervalSeconds, config.MinIntervalSeconds)
+		cfg.IntervalSeconds = config.MinIntervalSeconds
 	}
 
 	path := cfg.ConfigPath
@@ -149,39 +157,25 @@ func runCmd(args []string) {
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
-	if loaded.IntervalSeconds <= 0 {
-		loaded.IntervalSeconds = 60
+
+	if loaded.Credential == "" && loaded.EnrollmentToken != "" {
+		if err := registerAndSave(&loaded, loaded.ConfigPath); err != nil {
+			log.Fatalf("register agent: %v", err)
+		}
+	}
+	if loaded.Credential == "" {
+		log.Fatal("missing credential or enrollment token")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), shutdownSignals()...)
 	defer stop()
-	go runInventoryLoop(ctx, loaded)
-	go runUpdateCheck(ctx, loaded.ServerURL)
-	if err := runLoop(ctx, loaded); err != nil {
-		log.Fatal(err)
-	}
-}
 
-func runUpdateCheck(ctx context.Context, serverURL string) {
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	check := func() {
-		latest, hasUpdate, err := updater.CheckLatest(ctx, serverURL, version.Version)
-		if err != nil {
-			return // silent — server may not yet expose the endpoint
-		}
-		if hasUpdate {
-			log.Printf("update available: current=%s latest=%s", version.Version, latest)
-		}
+	if loaded.StatusListenAddr != "" {
+		go startStatusServer(ctx, loaded)
 	}
-	check() // immediate check on startup
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			check()
-		}
+
+	if err := agentruntime.Run(ctx, loaded); err != nil {
+		log.Fatal(err)
 	}
 }
 
@@ -200,7 +194,7 @@ func onceCmd(args []string) {
 			log.Fatalf("register agent: %v", err)
 		}
 	}
-	if err := sendOnce(context.Background(), loaded); err != nil {
+	if err := sendOnceCmd(context.Background(), loaded); err != nil {
 		log.Fatal(err)
 	}
 	fmt.Println("metrics sent")
@@ -209,6 +203,7 @@ func onceCmd(args []string) {
 func statusCmd(args []string) {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	configPath := fs.String("config", config.DefaultServiceConfigPath(), "config file path")
+	showMetrics := fs.Bool("metrics", false, "also collect and print sample metrics (without sending)")
 	if err := fs.Parse(args); err != nil {
 		log.Fatal(err)
 	}
@@ -222,7 +217,31 @@ func statusCmd(args []string) {
 	} else {
 		fmt.Printf("service_status=%v\n", status)
 	}
-	fmt.Printf("config=%s\nserver_url=%s\nagent_id=%s\nname=%s\ninterval_seconds=%d\nprofile=%s\ninstall_path=%s\n", *configPath, cfg.ServerURL, cfg.AgentID, cfg.Name, cfg.IntervalSeconds, cfg.Profile, config.DefaultInstallPath())
+	fmt.Printf("config=%s\nserver_url=%s\nagent_id=%s\nname=%s\ninterval_seconds=%d\nprofile=%s\ninstall_path=%s\nversion=%s\n",
+		*configPath, cfg.ServerURL, cfg.AgentID, cfg.Name, cfg.IntervalSeconds, cfg.Profile,
+		config.DefaultInstallPath(), version.Version)
+	// pendientes en buffer offline
+	bufDir := cfg.BufferDir
+	if bufDir == "" {
+		bufDir = config.DefaultBufferDir()
+	}
+	if buf, err := buffer.New(bufDir); err == nil {
+		fmt.Printf("buffer_pending=%d\nbuffer_dir=%s\n", buf.Count(), bufDir)
+	}
+	if *showMetrics {
+		fmt.Println("---- collecting sample (no send) ----")
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		host, _ := collector.HostInfo()
+		metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
+		if err != nil {
+			fmt.Printf("collect error: %v\n", err)
+			return
+		}
+		out := map[string]any{"host": host, "metrics": metrics}
+		data, _ := json.MarshalIndent(out, "", "  ")
+		fmt.Println(string(data))
+	}
 }
 
 func doctorCmd(args []string) {
@@ -243,7 +262,7 @@ func doctorCmd(args []string) {
 	if loaded.Credential == "" && loaded.EnrollmentToken == "" {
 		log.Fatal("missing credential or enrollment token")
 	}
-	if err := sendOnce(context.Background(), loaded); err != nil {
+	if err := sendOnceCmd(context.Background(), loaded); err != nil {
 		log.Fatalf("send test failed: %v", err)
 	}
 	fmt.Println("send test ok")
@@ -257,97 +276,26 @@ func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	fs.StringVar(&cfg.EnrollmentToken, "enrollment-token", "", "one-time enrollment token")
 	fs.StringVar(&cfg.Credential, "credential", "", "agent credential")
 	fs.StringVar(&cfg.Name, "name", "", "agent display name")
-	fs.StringVar(&cfg.Profile, "profile", "", "metrics profile: minimal or balanced")
+	fs.StringVar(&cfg.Profile, "profile", "", "metrics profile: minimal | balanced | full")
 	fs.StringVar(&cfg.ServiceChecksCSV, "services", "", "comma-separated process/service names to check")
-	fs.IntVar(&cfg.IntervalSeconds, "interval", 0, "collection interval in seconds")
+	fs.IntVar(&cfg.IntervalSeconds, "interval", 0, fmt.Sprintf("collection interval in seconds (min %d)", config.MinIntervalSeconds))
+	fs.BoolVar(&cfg.InsecureSkipTLS, "insecure-skip-tls", false, "skip TLS certificate verification (only for self-signed servers in LAN)")
+	fs.StringVar(&cfg.StatusListenAddr, "status-listen", "", "address for local status HTTP endpoint (e.g. 127.0.0.1:9099)")
 	return fs, cfg
 }
 
 func normalizeFlagConfig(cfg *config.Config) {
-	if cfg.Profile == "" {
-		cfg.Profile = "balanced"
+	if cfg.Profile != "" && cfg.Profile != "minimal" && cfg.Profile != "balanced" && cfg.Profile != "full" {
+		log.Fatalf("invalid profile %q (use minimal | balanced | full)", cfg.Profile)
 	}
 	if cfg.ServiceChecksCSV != "" {
 		cfg.ServiceChecks = append(cfg.ServiceChecks, config.SplitCSV(cfg.ServiceChecksCSV)...)
 	}
 }
 
-func runLoop(ctx context.Context, cfg config.Config) error {
-	if cfg.Credential == "" && cfg.EnrollmentToken != "" {
-		if err := registerAndSave(&cfg, cfg.ConfigPath); err != nil {
-			return err
-		}
-	}
-	if cfg.Credential == "" {
-		return fmt.Errorf("missing credential or enrollment token")
-	}
-
-	ticker := time.NewTicker(time.Duration(cfg.IntervalSeconds) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		sendOnceWithRetry(ctx, cfg)
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-		}
-	}
-}
-
-func sendOnceWithRetry(ctx context.Context, cfg config.Config) {
-	delays := []time.Duration{0, 5 * time.Second, 15 * time.Second}
-	for attempt, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-		}
-		if err := sendOnce(ctx, cfg); err != nil {
-			if errors.Is(err, client.ErrUnauthorized) {
-				log.Printf("AUTH ERROR: %v — agent will keep retrying every %ds; reinstall on this host with a new --enrollment-token to recover", err, cfg.IntervalSeconds)
-				return
-			}
-			log.Printf("send metrics failed attempt=%d/%d: %v", attempt+1, len(delays), err)
-			continue
-		}
-		return
-	}
-}
-
-func runInventoryLoop(ctx context.Context, cfg config.Config) {
-	sendInventory(ctx, cfg)
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			sendInventory(ctx, cfg)
-		}
-	}
-}
-
-func sendInventory(ctx context.Context, cfg config.Config) {
-	if cfg.Credential == "" {
-		return
-	}
-	inv := collector.Inventory{
-		Hardware: collector.CollectHardware(),
-		Software: collector.CollectSoftware(),
-	}
-	api := client.New(cfg.ServerURL, cfg.Credential)
-	if err := api.SendInventory(ctx, inv); err != nil {
-		log.Printf("inventory send failed: %v", err)
-	} else {
-		log.Printf("inventory sent hardware=%s software=%d", inv.Hardware.CPUModel, len(inv.Software))
-	}
-}
-
-func sendOnce(ctx context.Context, cfg config.Config) error {
+// sendOnceCmd realiza un único envío sincrónico (heartbeat + métricas).
+// Lo usan once y doctor.
+func sendOnceCmd(ctx context.Context, cfg config.Config) error {
 	info, err := collector.HostInfo()
 	if err != nil {
 		return err
@@ -355,7 +303,7 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	if cfg.Name != "" {
 		info.Name = cfg.Name
 	}
-	api := client.New(cfg.ServerURL, cfg.Credential)
+	api := client.NewWithTLS(cfg.ServerURL, cfg.Credential, cfg.InsecureSkipTLS)
 	if err := api.Heartbeat(ctx, info); err != nil {
 		return err
 	}
@@ -379,7 +327,7 @@ func registerAndSave(cfg *config.Config, path string) error {
 	if cfg.Name != "" {
 		info.Name = cfg.Name
 	}
-	api := client.New(cfg.ServerURL, "")
+	api := client.NewWithTLS(cfg.ServerURL, "", cfg.InsecureSkipTLS)
 	result, err := api.Register(context.Background(), cfg.EnrollmentToken, info)
 	if err != nil {
 		return err
@@ -465,6 +413,52 @@ func samePath(left, right string) bool {
 		return strings.EqualFold(left, right)
 	}
 	return left == right
+}
+
+// startStatusServer expone un endpoint HTTP local con el último estado del
+// agente (sólo para debugging — bind por defecto en 127.0.0.1).
+func startStatusServer(ctx context.Context, cfg config.Config) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		host, _ := collector.HostInfo()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"version":           version.Version,
+			"agent_id":          cfg.AgentID,
+			"name":              cfg.Name,
+			"profile":           cfg.Profile,
+			"interval_seconds":  cfg.IntervalSeconds,
+			"server_url":        cfg.ServerURL,
+			"host":              host,
+			"agent_started_at":  time.Now().Add(-time.Duration(host.AgentUptimeSec) * time.Second),
+		})
+	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
+		c, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+		defer cancel()
+		metrics, err := collector.Collect(c, cfg.Profile, cfg.ServiceChecks)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(metrics)
+	})
+	server := &http.Server{
+		Addr:              cfg.StatusListenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		<-ctx.Done()
+		shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = server.Shutdown(shutdown)
+	}()
+	log.Printf("status endpoint listening on %s", cfg.StatusListenAddr)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("status endpoint error: %v", err)
+	}
 }
 
 func init() {

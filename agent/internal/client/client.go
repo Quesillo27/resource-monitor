@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,11 +28,24 @@ type RegisterResponse struct {
 	Credential string `json:"credential"`
 }
 
+// New crea un cliente HTTP. insecureTLS=true desactiva la verificación de
+// certificados (sólo para servers con cert auto-firmado en LAN).
 func New(baseURL, credential string) *Client {
+	return NewWithTLS(baseURL, credential, false)
+}
+
+func NewWithTLS(baseURL, credential string, insecureTLS bool) *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if insecureTLS {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	}
 	return &Client{
 		baseURL:    strings.TrimRight(baseURL, "/"),
 		credential: credential,
-		http:       &http.Client{Timeout: 30 * time.Second},
+		http: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: transport,
+		},
 	}
 }
 
@@ -59,6 +73,13 @@ func (c *Client) SendMetrics(ctx context.Context, metrics collector.Metrics) err
 
 func (c *Client) SendInventory(ctx context.Context, inv collector.Inventory) error {
 	return c.post(ctx, "/api/agent/inventory", inv, true, nil)
+}
+
+// SendOfflineNotice avisa al server que el agente se está apagando limpiamente
+// (shutdown del host o stop del servicio). Permite marcar offline en segundos
+// en lugar de esperar OFFLINE_AFTER_SECONDS (180s default).
+func (c *Client) SendOfflineNotice(ctx context.Context, reason string) error {
+	return c.post(ctx, "/api/agent/offline", map[string]string{"reason": reason}, true, nil)
 }
 
 func (c *Client) post(ctx context.Context, path string, payload any, auth bool, out any) error {

@@ -226,6 +226,21 @@ func (s *Store) Heartbeat(ctx context.Context, agentID string, req models.Heartb
 	return err
 }
 
+// MarkAgentOffline fuerza el estado del agente a offline tras una notificación
+// de shutdown. Mueve last_seen_at hacia atrás para que el cálculo dinámico de
+// status (basado en OFFLINE_AFTER_SECONDS) lo reporte offline inmediatamente.
+// El siguiente heartbeat lo restaura a online de forma natural.
+func (s *Store) MarkAgentOffline(ctx context.Context, agentID, reason string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE agents
+		SET status = 'offline',
+		    last_seen_at = now() - interval '24 hours',
+		    updated_at = now()
+		WHERE id = $1
+	`, agentID)
+	return err
+}
+
 func (s *Store) InsertMetrics(ctx context.Context, agentID string, req models.MetricsRequest) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

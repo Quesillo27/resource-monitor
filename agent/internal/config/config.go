@@ -9,17 +9,27 @@ import (
 	"strings"
 )
 
+const (
+	// MinIntervalSeconds evita que un usuario configure un intervalo
+	// agresivo que sature al backend (rate limit del agente).
+	MinIntervalSeconds = 10
+)
+
 type Config struct {
-	ConfigPath       string   `json:"-"`
-	ServerURL        string   `json:"server_url"`
-	EnrollmentToken  string   `json:"enrollment_token,omitempty"`
-	Credential       string   `json:"credential,omitempty"`
-	AgentID          string   `json:"agent_id,omitempty"`
-	IntervalSeconds  int      `json:"interval_seconds"`
-	Name             string   `json:"name,omitempty"`
-	Profile          string   `json:"profile,omitempty"`
-	ServiceChecks    []string `json:"service_checks,omitempty"`
-	ServiceChecksCSV string   `json:"-"`
+	ConfigPath           string   `json:"-"`
+	ServerURL            string   `json:"server_url"`
+	EnrollmentToken      string   `json:"enrollment_token,omitempty"`
+	Credential           string   `json:"credential,omitempty"`
+	AgentID              string   `json:"agent_id,omitempty"`
+	IntervalSeconds      int      `json:"interval_seconds"`
+	Name                 string   `json:"name,omitempty"`
+	Profile              string   `json:"profile,omitempty"`
+	ServiceChecks        []string `json:"service_checks,omitempty"`
+	ServiceChecksCSV     string   `json:"-"`
+	InsecureSkipTLS      bool     `json:"insecure_skip_tls,omitempty"`
+	StatusListenAddr     string   `json:"status_listen_addr,omitempty"`
+	BufferDir            string   `json:"buffer_dir,omitempty"`
+	InventoryFingerprint string   `json:"inventory_fingerprint,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -76,8 +86,17 @@ func LoadWithOverrides(overrides Config) (Config, error) {
 	if overrides.IntervalSeconds > 0 {
 		cfg.IntervalSeconds = overrides.IntervalSeconds
 	}
+	if overrides.InsecureSkipTLS {
+		cfg.InsecureSkipTLS = true
+	}
+	if overrides.StatusListenAddr != "" {
+		cfg.StatusListenAddr = overrides.StatusListenAddr
+	}
 	if cfg.IntervalSeconds == 0 {
 		cfg.IntervalSeconds = 60
+	}
+	if cfg.IntervalSeconds < MinIntervalSeconds {
+		cfg.IntervalSeconds = MinIntervalSeconds
 	}
 	if cfg.Profile == "" {
 		cfg.Profile = "balanced"
@@ -130,4 +149,17 @@ func DefaultInstallPath() string {
 		return filepath.Join(programFiles, "ResourceMonitorAgent", "resource-monitor-agent.exe")
 	}
 	return "/usr/local/bin/resource-monitor-agent"
+}
+
+// DefaultBufferDir devuelve el directorio donde se almacenan muestras
+// pendientes de envío cuando el server está caído.
+func DefaultBufferDir() string {
+	if runtime.GOOS == "windows" {
+		programData := os.Getenv("ProgramData")
+		if programData == "" {
+			programData = `C:\ProgramData`
+		}
+		return filepath.Join(programData, "ResourceMonitorAgent", "buffer")
+	}
+	return "/var/lib/resource-monitor-agent/buffer"
 }

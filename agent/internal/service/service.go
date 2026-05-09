@@ -5,11 +5,8 @@ import (
 	"log"
 	"time"
 
-	"resource-monitor/agent/internal/client"
-	"resource-monitor/agent/internal/collector"
 	"resource-monitor/agent/internal/config"
-	"resource-monitor/agent/internal/updater"
-	"resource-monitor/agent/internal/version"
+	agentruntime "resource-monitor/agent/internal/runtime"
 
 	"github.com/kardianos/service"
 )
@@ -19,6 +16,7 @@ const serviceName = "resource-monitor-agent"
 type program struct {
 	configPath string
 	cancel     context.CancelFunc
+	done       chan struct{}
 }
 
 func Install(configPath string) error {
@@ -73,13 +71,24 @@ func Run(configPath string) error {
 func (p *program) Start(s service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
-	go p.run(ctx)
+	p.done = make(chan struct{})
+	go func() {
+		defer close(p.done)
+		p.run(ctx)
+	}()
 	return nil
 }
 
 func (p *program) Stop(s service.Service) error {
 	if p.cancel != nil {
 		p.cancel()
+	}
+	if p.done != nil {
+		// dejar margen para que runtime.Run envíe el offline notice
+		select {
+		case <-p.done:
+		case <-time.After(8 * time.Second):
+		}
 	}
 	return nil
 }
@@ -90,117 +99,32 @@ func (p *program) run(ctx context.Context) {
 		log.Printf("load config: %v", err)
 		return
 	}
-	if cfg.IntervalSeconds <= 0 {
-		cfg.IntervalSeconds = 60
+	if cfg.IntervalSeconds < config.MinIntervalSeconds {
+		cfg.IntervalSeconds = config.MinIntervalSeconds
 	}
-	go runInventoryLoop(ctx, cfg)
-	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
-		defer ticker.Stop()
-		// immediate check on startup
-		if latest, has, err := updater.CheckLatest(ctx, cfg.ServerURL, version.Version); err == nil && has {
-			log.Printf("update available: current=%s latest=%s", version.Version, latest)
-		}
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if latest, has, err := updater.CheckLatest(ctx, cfg.ServerURL, version.Version); err == nil && has {
-					log.Printf("update available: current=%s latest=%s", version.Version, latest)
-				}
-			}
-		}
-	}()
-	ticker := time.NewTicker(time.Duration(cfg.IntervalSeconds) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		sendWithRetry(ctx, cfg)
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
+	if err := agentruntime.Run(ctx, cfg); err != nil {
+		log.Printf("agent runtime exited: %v", err)
 	}
 }
 
-func runInventoryLoop(ctx context.Context, cfg config.Config) {
-	sendInventory(ctx, cfg)
-	ticker := time.NewTicker(24 * time.Hour)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			sendInventory(ctx, cfg)
-		}
-	}
-}
-
-func sendInventory(ctx context.Context, cfg config.Config) {
-	if cfg.Credential == "" {
-		return
-	}
-	inv := collector.Inventory{
-		Hardware: collector.CollectHardware(),
-		Software: collector.CollectSoftware(),
-	}
-	api := client.New(cfg.ServerURL, cfg.Credential)
-	if err := api.SendInventory(ctx, inv); err != nil {
-		log.Printf("inventory send failed: %v", err)
-	} else {
-		log.Printf("inventory sent hardware=%s software=%d", inv.Hardware.CPUModel, len(inv.Software))
-	}
-}
-
-func sendWithRetry(ctx context.Context, cfg config.Config) {
-	delays := []time.Duration{0, 5 * time.Second, 15 * time.Second}
-	for attempt, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(delay):
-			}
-		}
-		if err := send(ctx, cfg); err != nil {
-			log.Printf("send metrics failed attempt=%d/%d: %v", attempt+1, len(delays), err)
-			continue
-		}
-		return
-	}
-}
-
-func send(ctx context.Context, cfg config.Config) error {
-	info, err := collector.HostInfo()
-	if err != nil {
-		return err
-	}
-	if cfg.Name != "" {
-		info.Name = cfg.Name
-	}
-	api := client.New(cfg.ServerURL, cfg.Credential)
-	if err := api.Heartbeat(ctx, info); err != nil {
-		return err
-	}
-	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
-	if err != nil {
-		return err
-	}
-	if err := api.SendMetrics(ctx, metrics); err != nil {
-		return err
-	}
-	return nil
-}
-
+// serviceConfig configura el servicio nativo (systemd/SCM/launchd) con
+// auto-restart en caso de crash. systemd usa Restart=always (default) con
+// RestartSec=120 hardcoded en kardianos; Windows usa OnFailure=restart con
+// delay de 10s y reset de errores cada 60s.
 func serviceConfig(configPath string) *service.Config {
 	return &service.Config{
 		Name:        serviceName,
 		DisplayName: "Resource Monitor Agent",
 		Description: "Collects CPU, memory, disk and host metrics for Resource Monitor.",
 		Arguments:   []string{"service", "--config", configPath},
+		Option: service.KeyValue{
+			"Restart":                "always",
+			"SuccessExitStatus":      "0",
+			"LogOutput":              true,
+			"OnFailure":              "restart",
+			"OnFailureDelayDuration": "10s",
+			"OnFailureResetPeriod":   60,
+		},
 	}
 }
 
