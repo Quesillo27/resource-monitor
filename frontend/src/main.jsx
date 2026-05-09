@@ -49,6 +49,7 @@ function App() {
 
 function Shell({ token, view, setView, onLogout }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
+  const [agentsInitialFilter, setAgentsInitialFilter] = useState('all');
   const api = useMemo(() => createApi(token, onLogout), [token, onLogout]);
   const nav = [
     ['dashboard', LayoutDashboard, 'Dashboard'],
@@ -57,6 +58,13 @@ function Shell({ token, view, setView, onLogout }) {
     ['alerts', ShieldAlert, 'Alertas'],
     ['settings', Settings, 'Configuración'],
   ];
+  const navigateTo = (target, opts = {}) => {
+    if (target === 'agents') {
+      setSelectedAgent(null);
+      setAgentsInitialFilter(opts.statusFilter || 'all');
+    }
+    setView(target);
+  };
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -67,7 +75,10 @@ function Shell({ token, view, setView, onLogout }) {
         <nav>
           {nav.map(([id, Icon, label]) => (
             <button key={id} className={view === id ? 'active' : ''} onClick={() => {
-              if (id === 'agents') setSelectedAgent(null);
+              if (id === 'agents') {
+                setSelectedAgent(null);
+                setAgentsInitialFilter('all');
+              }
               setView(id);
             }}>
               <Icon size={18} />{label}
@@ -77,8 +88,8 @@ function Shell({ token, view, setView, onLogout }) {
         <button className="logout" onClick={onLogout}><LogOut size={18} />Salir</button>
       </aside>
       <main>
-        {view === 'dashboard' && <Dashboard api={api} />}
-        {view === 'agents' && (selectedAgent ? <AgentDetail api={api} agentId={selectedAgent} onBack={() => setSelectedAgent(null)} /> : <Agents api={api} onSelect={setSelectedAgent} />)}
+        {view === 'dashboard' && <Dashboard api={api} navigateTo={navigateTo} />}
+        {view === 'agents' && (selectedAgent ? <AgentDetail api={api} agentId={selectedAgent} onBack={() => setSelectedAgent(null)} /> : <Agents api={api} onSelect={setSelectedAgent} initialFilter={agentsInitialFilter} />)}
         {view === 'enroll' && <Enrollment api={api} />}
         {view === 'alerts' && <AlertsCenter api={api} />}
         {view === 'settings' && <SettingsPage api={api} />}
@@ -123,39 +134,193 @@ function Login({ onLogin }) {
   );
 }
 
-function Dashboard({ api }) {
+function Dashboard({ api, navigateTo }) {
   const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/dashboard/overview'), [], REFRESH_MS);
+  const { data: tagsData } = useLoad(() => api.get('/api/tags'), [], 0);
+  const [tagFilter, setTagFilter] = useState('');
   const overview = data || {};
   const stats = overview.summary || overview;
   const counts = overview.status_counts || overview.status_distribution || {};
+  const trends = overview.trends_24h || {};
+  const capacity = overview.capacity || {};
+  const osDist = overview.os_distribution || {};
+  const heatmap = overview.heatmap_24h || [];
+  const availableTags = tagsData?.tags || [];
+
+  const filterByTag = (list) => {
+    if (!tagFilter || !Array.isArray(list)) return list || [];
+    return list.filter((a) => Array.isArray(a.tags) && a.tags.includes(tagFilter));
+  };
+  const topCpu = filterByTag(overview.top_cpu || []);
+  const topRam = filterByTag(overview.top_memory || []);
+  const staleAgents = filterByTag(overview.stale_agents || []);
+  const recentAlerts = tagFilter
+    ? (overview.recent_alerts || []).filter((al) => Array.isArray(al.tags) && al.tags.includes(tagFilter))
+    : (overview.recent_alerts || []);
+
+  const total = (Number(counts.online || 0) + Number(counts.warning || 0) + Number(counts.critical || 0) + Number(counts.offline || 0)) || 1;
+  const uptimePct = Math.round((Number(counts.online || 0) / total) * 100);
+  const alertsTrend = trends.alerts || [];
+  const alertsTrendDelta = alertsTrend.length >= 2
+    ? alertsTrend.slice(-3).reduce((a, b) => a + b, 0) - alertsTrend.slice(0, 3).reduce((a, b) => a + b, 0)
+    : 0;
+  const ramUsedPct = capacity.ram_total_bytes ? (Number(capacity.ram_used_bytes || 0) / Number(capacity.ram_total_bytes)) * 100 : 0;
+  const diskUsedPct = capacity.disk_total_bytes ? (Number(capacity.disk_used_bytes || 0) / Number(capacity.disk_total_bytes)) * 100 : 0;
+
   return (
     <section>
       <Header title="Dashboard operativo" meta={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />} />
-      <div className="health-hero">
-        <div>
-          <span>Salud global</span>
-          <strong>{stats.critical_agents ? 'Atencion critica' : stats.warning_agents ? 'Con advertencias' : 'Operando normal'}</strong>
-          <p>{stats.total_agents || 0} equipos monitoreados, {stats.active_alerts || 0} alertas activas</p>
+
+      {availableTags.length > 0 && (
+        <div className="dashboard-filterbar">
+          <span>Filtrar por grupo:</span>
+          <select value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+            <option value="">Todos</option>
+            {availableTags.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {tagFilter && <span className="filter-hint">Listas filtradas; KPIs muestran totales globales.</span>}
         </div>
-        <StatusDonut counts={counts} />
+      )}
+
+      <div className="dash-hero-grid">
+        <article className={`dash-hero-card tone-${stats.critical_agents ? 'critical' : stats.warning_agents ? 'warning' : 'online'}`}>
+          <span>Uptime cluster</span>
+          <strong>{uptimePct}%</strong>
+          <small>{counts.online || 0} de {total} online</small>
+          <StatusDonut counts={counts} />
+        </article>
+        <article className="dash-hero-card">
+          <span>Tendencia alertas (24h)</span>
+          <strong>{stats.active_alerts || 0}<small className={alertsTrendDelta > 0 ? 'tone-bad' : alertsTrendDelta < 0 ? 'tone-good' : ''}>
+            {alertsTrendDelta > 0 ? `↑ +${alertsTrendDelta}` : alertsTrendDelta < 0 ? `↓ ${alertsTrendDelta}` : '— estable'}
+          </small></strong>
+          <Sparkline points={alertsTrend} color="#ef4444" width={180} height={40} />
+        </article>
+        <button className="dash-hero-card clickable" onClick={() => navigateTo('agents', { statusFilter: 'critical' })}>
+          <span>Equipos críticos</span>
+          <strong className="tone-bad">{stats.critical_agents || 0}</strong>
+          <small>Click para ver listado</small>
+        </button>
       </div>
+
       <div className="kpi-grid">
-        <Kpi icon={Server} label="Online" value={stats.online_agents ?? 0} tone="good" />
-        <Kpi icon={Monitor} label="Offline" value={stats.offline_agents ?? 0} tone="muted" />
-        <Kpi icon={AlertTriangle} label="Alertas" value={stats.active_alerts ?? 0} tone="bad" />
-        <Kpi icon={Cpu} label="CPU promedio" value={`${round(stats.avg_cpu_percent)}%`} />
-        <Kpi icon={MemoryStick} label="RAM promedio" value={`${round(stats.avg_memory_percent)}%`} />
-        <Kpi icon={Network} label="Trafico red" value={bytes(stats.network_total_bytes)} />
-        <Kpi icon={HardDrive} label="Discos criticos" value={stats.critical_disks ?? 0} tone="bad" />
-        <Kpi icon={Settings} label="Servicios caidos" value={stats.services_down ?? 0} tone="bad" />
+        <KpiClick icon={Server} label="Online" value={stats.online_agents ?? 0} tone="good" onClick={() => navigateTo('agents', { statusFilter: 'online' })} />
+        <KpiClick icon={Monitor} label="Offline" value={stats.offline_agents ?? 0} tone="muted" onClick={() => navigateTo('agents', { statusFilter: 'offline' })} />
+        <KpiClick icon={AlertTriangle} label="Alertas activas" value={stats.active_alerts ?? 0} tone="bad" sparkline={trends.alerts} sparkColor="#ef4444" onClick={() => navigateTo('alerts')} />
+        <KpiClick icon={Cpu} label="CPU promedio" value={`${round(stats.avg_cpu_percent)}%`} sparkline={trends.cpu} sparkColor="#3b82f6" />
+        <KpiClick icon={MemoryStick} label="RAM promedio" value={`${round(stats.avg_memory_percent)}%`} sparkline={trends.memory} sparkColor="#a855f7" />
+        <KpiClick icon={HardDrive} label="Discos críticos" value={stats.critical_disks ?? 0} tone="bad" onClick={() => navigateTo('alerts')} />
+        <KpiClick icon={Settings} label="Servicios caídos" value={stats.services_down ?? 0} tone="bad" onClick={() => navigateTo('alerts')} />
       </div>
+
       <div className="dashboard-grid">
-        <Panel title="Top CPU"><MiniAgentList agents={overview.top_cpu || []} metric="cpu_percent" /></Panel>
-        <Panel title="Top RAM"><MiniAgentList agents={overview.top_memory || []} metric="memory_used_percent" /></Panel>
-        <Panel title="Equipos sin metrica reciente"><MiniAgentList agents={overview.stale_agents || []} empty="Sin equipos vencidos" /></Panel>
-        <Panel title="Ultimas alertas"><AlertList alerts={overview.recent_alerts || []} compact /></Panel>
+        <Panel title="Top CPU"><BarAgentList agents={topCpu} metric="cpu_percent" color="#3b82f6" onSelect={(a) => navigateTo('agents')} /></Panel>
+        <Panel title="Top RAM"><BarAgentList agents={topRam} metric="memory_used_percent" color="#a855f7" onSelect={(a) => navigateTo('agents')} /></Panel>
+        <Panel title="Equipos sin métrica reciente"><MiniAgentList agents={staleAgents} empty="Sin equipos vencidos" /></Panel>
+        <Panel title="Últimas alertas"><AlertList alerts={recentAlerts} compact api={api} onChange={reload} /></Panel>
+      </div>
+
+      <div className="dashboard-grid">
+        <Panel title="Capacidad cluster">
+          <CapacityPanel ramUsedPct={ramUsedPct} ramUsed={capacity.ram_used_bytes} ramTotal={capacity.ram_total_bytes}
+                         diskUsedPct={diskUsedPct} diskUsed={capacity.disk_used_bytes} diskTotal={capacity.disk_total_bytes} diskFree={capacity.disk_free_bytes} />
+        </Panel>
+        <Panel title="Distribución por OS">
+          <OsDistribution dist={osDist} />
+        </Panel>
+        <Panel title="Heatmap alertas (7d, hora del día)">
+          <Heatmap buckets={heatmap} />
+        </Panel>
       </div>
     </section>
+  );
+}
+
+function KpiClick({ icon: Icon, label, value, tone = '', sparkline, sparkColor = '#3b82f6', onClick }) {
+  const Tag = onClick ? 'button' : 'article';
+  return (
+    <Tag className={`kpi ${tone} ${onClick ? 'clickable' : ''}`} onClick={onClick}>
+      <Icon size={22} />
+      <span>{label}</span>
+      <strong>{value}</strong>
+      {sparkline && sparkline.length >= 2 && (
+        <div className="kpi-spark"><Sparkline points={sparkline} color={sparkColor} width={120} height={28} /></div>
+      )}
+    </Tag>
+  );
+}
+
+function BarAgentList({ agents, metric, color, onSelect }) {
+  if (!agents || !agents.length) return <p className="empty-panel">Sin datos</p>;
+  return (
+    <div className="bar-list">
+      {agents.map((agent) => {
+        const value = Number(agent[metric] || 0);
+        const pct = Math.max(0, Math.min(100, value));
+        const tone = pct >= 90 ? '#ef4444' : pct >= 75 ? '#f59e0b' : color;
+        return (
+          <button key={agent.id} className="bar-row" onClick={() => onSelect && onSelect(agent)}>
+            <div className="bar-row-head">
+              <strong>{agent.name}</strong>
+              <span>{percent(value)}</span>
+            </div>
+            <div className="bar-track"><div className="bar-fill" style={{ width: `${pct}%`, background: tone }} /></div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CapacityPanel({ ramUsedPct, ramUsed, ramTotal, diskUsedPct, diskUsed, diskTotal, diskFree }) {
+  return (
+    <div className="capacity-grid">
+      <div>
+        <div className="cap-row"><span>RAM</span><strong>{percent(ramUsedPct)}</strong></div>
+        <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.min(100, ramUsedPct)}%`, background: ramUsedPct >= 85 ? '#ef4444' : '#a855f7' }} /></div>
+        <small>{bytes(ramUsed)} / {bytes(ramTotal)}</small>
+      </div>
+      <div>
+        <div className="cap-row"><span>Disco</span><strong>{percent(diskUsedPct)}</strong></div>
+        <div className="bar-track"><div className="bar-fill" style={{ width: `${Math.min(100, diskUsedPct)}%`, background: diskUsedPct >= 85 ? '#ef4444' : '#3b82f6' }} /></div>
+        <small>{bytes(diskUsed)} / {bytes(diskTotal)} · libre {bytes(diskFree)}</small>
+      </div>
+    </div>
+  );
+}
+
+function OsDistribution({ dist }) {
+  const entries = Object.entries(dist || {}).filter(([, v]) => v > 0);
+  if (!entries.length) return <p className="empty-panel">Sin datos</p>;
+  const total = entries.reduce((a, [, v]) => a + v, 0) || 1;
+  const palette = { linux: '#22c55e', windows: '#3b82f6', macos: '#a855f7', otro: '#64748b', desconocido: '#94a3b8' };
+  return (
+    <div className="os-dist">
+      {entries.map(([os, count]) => (
+        <div key={os} className="os-row">
+          <div className="os-row-head"><span style={{ background: palette[os] || '#64748b' }} className="os-dot" /><strong>{os}</strong><span>{count}</span></div>
+          <div className="bar-track"><div className="bar-fill" style={{ width: `${(count / total) * 100}%`, background: palette[os] || '#64748b' }} /></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Heatmap({ buckets }) {
+  if (!buckets || !buckets.length) return <p className="empty-panel">Sin alertas en los últimos 7 días</p>;
+  const max = Math.max(...buckets, 1);
+  return (
+    <div className="heatmap">
+      {buckets.map((count, hour) => {
+        const intensity = count / max;
+        const bg = count === 0 ? '#1f2937' : `rgba(239, 68, 68, ${0.2 + intensity * 0.8})`;
+        return (
+          <div key={hour} className="heat-cell" title={`${String(hour).padStart(2, '0')}:00 — ${count} alertas`} style={{ background: bg }}>
+            <span>{hour}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -221,9 +386,9 @@ function AgentRow({ agent, api, onSelect }) {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function Agents({ api, onSelect }) {
+function Agents({ api, onSelect, initialFilter = 'all' }) {
   const [query, setQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialFilter);
   const [tagFilter, setTagFilter] = useState('');
   const [osFilter, setOsFilter] = useState('');
   const { data: tagsData } = useLoad(() => api.get('/api/tags'), [], 0);
@@ -725,6 +890,18 @@ function UsersPanel({ api }) {
     }
   }
 
+  async function removeUser(u) {
+    if (u.username === 'admin') return;
+    if (!window.confirm(`¿Eliminar al usuario "${u.username}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await api.delete(`/api/users/${u.id}`);
+      setMessage({ type: 'ok', text: `Usuario "${u.username}" eliminado` });
+      reload();
+    } catch (e) {
+      setMessage({ type: 'err', text: e.message });
+    }
+  }
+
   return (
     <Panel title="Usuarios y permisos" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
       <p className="panel-hint">Roles: <strong>admin</strong> gestiona todo, <strong>operator</strong> opera reglas y agentes, <strong>viewer</strong> solo lectura.</p>
@@ -756,6 +933,9 @@ function UsersPanel({ api }) {
                   <div className="actions">
                     <IconButton icon={Edit3} label="Editar" onClick={() => setEditing({ ...u })} />
                     <IconButton icon={KeyRound} label="Cambiar contraseña" onClick={() => setPwModal({ id: u.id, username: u.username, password: '' })} />
+                    {u.username !== 'admin' && (
+                      <IconButton icon={Trash2} label="Eliminar" onClick={() => removeUser(u)} />
+                    )}
                   </div>
                 </td>
               </tr>

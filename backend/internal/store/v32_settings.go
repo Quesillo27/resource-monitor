@@ -178,6 +178,31 @@ func (s *Store) UpdateUserPassword(ctx context.Context, id, password string) err
 	return nil
 }
 
+func (s *Store) DeleteUser(ctx context.Context, id string) error {
+	if err := s.EnsureV32Schema(ctx); err != nil {
+		return err
+	}
+	var username string
+	err := s.pool.QueryRow(ctx, "SELECT username FROM users WHERE id = $1", id).Scan(&username)
+	if err == pgx.ErrNoRows {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if strings.EqualFold(strings.TrimSpace(username), "admin") {
+		return fmt.Errorf("no se puede eliminar el usuario admin")
+	}
+	result, err := s.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) GetTelegramSettings(ctx context.Context) (models.TelegramSettings, error) {
 	if err := s.EnsureV32Schema(ctx); err != nil {
 		return models.TelegramSettings{}, err

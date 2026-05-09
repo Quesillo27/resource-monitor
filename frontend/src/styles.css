@@ -270,6 +270,215 @@ h2 {
 .kpi.muted svg { color: var(--text-muted); }
 .kpi.bad strong { color: var(--red); }
 
+button.kpi.clickable {
+  background: inherit;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+}
+button.kpi.clickable:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+.kpi-spark {
+  margin-top: 4px;
+  opacity: 0.9;
+}
+
+/* ── Dashboard hero (3 cards) ── */
+.dash-hero-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+.dash-hero-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 6px;
+  padding: 18px 20px;
+  position: relative;
+}
+.dash-hero-card.clickable {
+  cursor: pointer;
+  text-align: left;
+  transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.dash-hero-card.clickable:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow);
+  transform: translateY(-1px);
+}
+.dash-hero-card > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dash-hero-card > strong {
+  align-items: baseline;
+  display: flex;
+  font-size: 32px;
+  font-weight: 700;
+  gap: 10px;
+  letter-spacing: -0.02em;
+}
+.dash-hero-card > strong > small {
+  font-size: 13px;
+  font-weight: 600;
+}
+.dash-hero-card > strong > small.tone-bad { color: var(--red); }
+.dash-hero-card > strong > small.tone-good { color: var(--green); }
+.dash-hero-card > small {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.dash-hero-card .status-donut {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+}
+.dash-hero-card.tone-critical { border-left: 3px solid var(--red); }
+.dash-hero-card.tone-warning  { border-left: 3px solid var(--amber); }
+.dash-hero-card.tone-online   { border-left: 3px solid var(--green); }
+
+@media (max-width: 980px) {
+  .dash-hero-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Filterbar ── */
+.dashboard-filterbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.dashboard-filterbar > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.dashboard-filterbar select {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  padding: 6px 10px;
+}
+.dashboard-filterbar .filter-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+}
+
+/* ── Bar agent list (Top CPU/RAM) ── */
+.bar-list { display: grid; gap: 10px; }
+.bar-row {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 4px 0;
+  text-align: left;
+  width: 100%;
+}
+.bar-row:hover .bar-row-head strong { color: var(--accent); }
+.bar-row-head {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  justify-content: space-between;
+}
+.bar-row-head strong { color: var(--text); font-weight: 600; }
+.bar-row-head span { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.bar-track {
+  background: rgba(148, 163, 184, 0.18);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+  width: 100%;
+}
+.bar-fill {
+  border-radius: 999px;
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+/* ── Capacity panel ── */
+.capacity-grid { display: grid; gap: 16px; }
+.capacity-grid .cap-row {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.capacity-grid .cap-row span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.capacity-grid .cap-row strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+.capacity-grid small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* ── OS distribution ── */
+.os-dist { display: grid; gap: 10px; }
+.os-row { display: grid; gap: 4px; }
+.os-row-head {
+  align-items: center;
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+}
+.os-row-head strong { color: var(--text); flex: 1; text-transform: capitalize; }
+.os-row-head span { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.os-dot {
+  border-radius: 50%;
+  display: inline-block;
+  height: 10px;
+  width: 10px;
+}
+
+/* ── Heatmap 24h ── */
+.heatmap {
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+.heat-cell {
+  aspect-ratio: 1 / 1;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  transition: transform 0.1s;
+}
+.heat-cell:hover {
+  transform: scale(1.15);
+  cursor: help;
+}
+
 /* ── Dashboard grid ── */
 .dashboard-grid, .chart-grid {
   display: grid;

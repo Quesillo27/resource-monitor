@@ -103,15 +103,19 @@ func (s *Store) DashboardOverview(ctx context.Context, offlineAfterSeconds int) 
 		return nil, err
 	}
 	distribution := map[string]int{"online": 0, "warning": 0, "critical": 0, "offline": 0}
+	osDistribution := map[string]int{}
 	stale := []models.Agent{}
 	now := time.Now()
 	for _, agent := range agents {
 		distribution[agent.Status]++
+		osKey := osFamilyV3(agent.OS)
+		osDistribution[osKey]++
 		if agent.LastMetricAt == nil || now.Sub(*agent.LastMetricAt) > 10*time.Minute {
 			stale = append(stale, agent)
 		}
 	}
 	summary["status_distribution"] = distribution
+	summary["os_distribution"] = osDistribution
 	summary["top_cpu"] = topAgentsV3(agents, func(a models.Agent) float64 { return ptrFloatV3(a.CPUPercent) })
 	summary["top_memory"] = topAgentsV3(agents, func(a models.Agent) float64 { return ptrFloatV3(a.MemoryPercent) })
 	summary["stale_agents"] = limitAgentsV3(stale, 8)
@@ -119,7 +123,139 @@ func (s *Store) DashboardOverview(ctx context.Context, offlineAfterSeconds int) 
 		alerts = alerts[:8]
 	}
 	summary["recent_alerts"] = alerts
+
+	if capacity, err := s.dashboardCapacity(ctx); err == nil {
+		summary["capacity"] = capacity
+	}
+	if trends, err := s.dashboardTrends(ctx); err == nil {
+		summary["trends_24h"] = trends
+	}
+	if heatmap, err := s.dashboardAlertHeatmap(ctx); err == nil {
+		summary["heatmap_24h"] = heatmap
+	}
 	return summary, nil
+}
+
+func osFamilyV3(os string) string {
+	o := strings.ToLower(strings.TrimSpace(os))
+	switch {
+	case o == "":
+		return "desconocido"
+	case strings.Contains(o, "windows"):
+		return "windows"
+	case strings.Contains(o, "darwin") || strings.Contains(o, "mac"):
+		return "macos"
+	case strings.Contains(o, "ubuntu") || strings.Contains(o, "debian") || strings.Contains(o, "rhel") || strings.Contains(o, "centos") || strings.Contains(o, "alpine") || strings.Contains(o, "linux"):
+		return "linux"
+	default:
+		return "otro"
+	}
+}
+
+func (s *Store) dashboardCapacity(ctx context.Context) (map[string]any, error) {
+	row := s.pool.QueryRow(ctx, `
+		WITH latest_mem AS (
+		  SELECT DISTINCT ON (agent_id) agent_id, memory_total_bytes, memory_used_bytes
+		  FROM metric_samples
+		  ORDER BY agent_id, captured_at DESC
+		), latest_disks AS (
+		  SELECT DISTINCT ON (agent_id, mountpoint) agent_id, mountpoint, total_bytes, used_bytes, free_bytes
+		  FROM disk_samples
+		  ORDER BY agent_id, mountpoint, captured_at DESC
+		)
+		SELECT
+		  COALESCE(SUM(latest_mem.memory_total_bytes), 0)::bigint,
+		  COALESCE(SUM(latest_mem.memory_used_bytes), 0)::bigint,
+		  COALESCE((SELECT SUM(total_bytes)::bigint FROM latest_disks), 0),
+		  COALESCE((SELECT SUM(used_bytes)::bigint  FROM latest_disks), 0),
+		  COALESCE((SELECT SUM(free_bytes)::bigint  FROM latest_disks), 0)
+		FROM latest_mem
+	`)
+	var ramTotal, ramUsed, diskTotal, diskUsed, diskFree int64
+	if err := row.Scan(&ramTotal, &ramUsed, &diskTotal, &diskUsed, &diskFree); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"ram_total_bytes":  ramTotal,
+		"ram_used_bytes":   ramUsed,
+		"disk_total_bytes": diskTotal,
+		"disk_used_bytes":  diskUsed,
+		"disk_free_bytes":  diskFree,
+	}, nil
+}
+
+func (s *Store) dashboardTrends(ctx context.Context) (map[string]any, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+		  date_trunc('hour', captured_at) AS bucket,
+		  AVG(cpu_percent)::float8         AS cpu_avg,
+		  AVG(memory_used_percent)::float8 AS mem_avg
+		FROM metric_samples
+		WHERE captured_at > now() - interval '24 hours'
+		GROUP BY bucket
+		ORDER BY bucket
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cpu := []float64{}
+	mem := []float64{}
+	for rows.Next() {
+		var bucket time.Time
+		var cpuAvg, memAvg float64
+		if err := rows.Scan(&bucket, &cpuAvg, &memAvg); err != nil {
+			return nil, err
+		}
+		cpu = append(cpu, cpuAvg)
+		mem = append(mem, memAvg)
+	}
+	alertRows, err := s.pool.Query(ctx, `
+		SELECT date_trunc('hour', opened_at) AS bucket, COUNT(*)::int
+		FROM alerts
+		WHERE opened_at > now() - interval '24 hours'
+		GROUP BY bucket
+		ORDER BY bucket
+	`)
+	if err != nil {
+		return map[string]any{"cpu": cpu, "memory": mem, "alerts": []int{}}, nil
+	}
+	defer alertRows.Close()
+	alerts := []int{}
+	for alertRows.Next() {
+		var bucket time.Time
+		var count int
+		if err := alertRows.Scan(&bucket, &count); err != nil {
+			return map[string]any{"cpu": cpu, "memory": mem, "alerts": alerts}, nil
+		}
+		alerts = append(alerts, count)
+	}
+	return map[string]any{"cpu": cpu, "memory": mem, "alerts": alerts}, nil
+}
+
+func (s *Store) dashboardAlertHeatmap(ctx context.Context) ([]int, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT EXTRACT(HOUR FROM opened_at)::int AS hour, COUNT(*)::int
+		FROM alerts
+		WHERE opened_at > now() - interval '7 days'
+		GROUP BY hour
+		ORDER BY hour
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	buckets := make([]int, 24)
+	for rows.Next() {
+		var hour, count int
+		if err := rows.Scan(&hour, &count); err != nil {
+			return buckets, nil
+		}
+		if hour >= 0 && hour < 24 {
+			buckets[hour] = count
+		}
+	}
+	return buckets, nil
 }
 
 func (s *Store) AgentDetailV3(ctx context.Context, id string, offlineAfterSeconds int) (map[string]any, error) {

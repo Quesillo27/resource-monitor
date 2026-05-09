@@ -77,6 +77,7 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin")).Post("/users", s.createUser)
 			r.With(s.requireRole("admin")).Patch("/users/{id}", s.updateUser)
 			r.With(s.requireRole("admin")).Post("/users/{id}/password", s.updateUserPassword)
+			r.With(s.requireRole("admin")).Delete("/users/{id}", s.deleteUser)
 		})
 
 		r.Post("/agent/register", s.registerAgent)
@@ -532,6 +533,19 @@ func (s *Server) updateUserPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) deleteUser(w http.ResponseWriter, r *http.Request) {
+	err := s.store.DeleteUser(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
