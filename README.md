@@ -22,7 +22,7 @@ Traefik (o nginx) sirve el frontend y proxy-pasa `/api/*` al backend. El fronten
 
 ## Quickstart
 
-**Requisitos:** Docker + Docker Compose v2.
+**Requisitos:** Docker + Docker Compose v2 + git (ya viene en cualquier instalación normal).
 
 ```bash
 git clone https://github.com/Quesillo27/resource-monitor.git
@@ -32,17 +32,36 @@ cd resource-monitor
 cp .env.example .env
 $EDITOR .env
 
-# 2. Redeploy completo (calcula versión, compila, levanta todo)
-./scripts/redeploy.sh
+# 2. Levantar todo
+docker compose up -d --build
 ```
 
 Eso levanta:
 - `postgres` en red interna
 - `backend` en `:8080`
-- `frontend` en `:3010` (o el puerto que mapees en compose)
-- `agent-assets` (corre, compila los binarios en `/downloads/`, y termina)
+- `frontend` en `:3000` (dev) o `:3010` (prod)
+- `agent-assets` — servicio **continuo** que detecta cambios en el commit git y recompila los binarios automáticamente
 
-Abrí la consola en `http://localhost:3010` y entrá con las credenciales iniciales del `.env`.
+Abrí la consola y entrá con las credenciales iniciales del `.env`.
+
+## Flujo de actualización (automático)
+
+El sistema detecta automáticamente la versión desde el SHA git del commit actual. **No tenés que tocar el `.env`** ni correr scripts manuales:
+
+```bash
+# Hiciste cambios y querés desplegar
+git pull   # o git commit
+docker compose up -d --build
+```
+
+Lo que pasa internamente:
+1. `agent-assets` corre un loop cada 15s comparando el SHA git actual contra el último compilado
+2. Cuando detecta un cambio, recompila los 4 binarios (Linux/Win/macOS amd64+arm64) con la versión `v1.0.0-<sha>` inyectada via `-ldflags` y escribe `/downloads/version.txt`
+3. El backend lee `version.txt` en cada llamada a `/api/agent/version` — sin reinicio
+4. En el siguiente heartbeat de cada agente remoto, si el backend detecta versión desactualizada, **encola automáticamente un comando `update`** (sin que tengas que clickear nada)
+5. El agente descarga el binario nuevo, valida SHA-256, y se auto-reinicia
+
+Resultado: un `git push` al manager + `docker compose up -d --build` actualiza toda la flota de agentes sin intervención manual.
 
 ---
 
@@ -61,40 +80,36 @@ ADMIN_PASSWORD=cambiar-en-primer-login
 OFFLINE_AFTER_SECONDS=180
 RETENTION_DAYS=30
 
-# Versionado de agentes (auto-gestionado por scripts/redeploy.sh)
-AGENT_RELEASE_VERSION=v1.0.0-dev
-
 # CORS / dominio público (opcional)
 ALLOWED_ORIGINS=http://localhost:3010
+
+# AGENT_RELEASE_VERSION ya NO se usa en condiciones normales — la versión
+# se deriva automáticamente del SHA git por agent-assets. Se deja como
+# fallback para entornos sin .git (p.ej. instalaciones desde release tarball).
+# AGENT_RELEASE_VERSION=v1.0.0
 ```
 
 ---
 
-## Scripts de operación
+## Scripts de operación (override manual)
 
-### `./scripts/redeploy.sh` — comando único de redeploy
+En condiciones normales **no necesitás los scripts** — el flujo automático cubre el 99% de los casos. Quedan disponibles para overrides puntuales:
 
-Hace todo el flujo de reconstrucción de forma idempotente:
-
-```bash
-./scripts/redeploy.sh                # versión auto: v1.0.0-<git-short-sha>
-./scripts/redeploy.sh v1.3.0         # versión explícita
-```
-
-Internamente:
-1. Calcula `AGENT_RELEASE_VERSION` desde el SHA de git (o usa el arg si lo pasás)
-2. Actualiza el `.env`
-3. Rebuild de backend + frontend + agent-assets
-4. Espera a que los binarios se compilen
-5. Verifica que `/api/agent/version` devuelva la versión nueva
-
-### `./scripts/set-version.sh` — bump de versión sin rebuild
+### `./scripts/redeploy.sh` — forzar versión específica + rebuild
 
 ```bash
-./scripts/set-version.sh                    # versión auto desde git
-./scripts/set-version.sh v1.3.0             # versión explícita
-./scripts/set-version.sh v1.3.0 --no-build  # solo .env, sin tocar containers
+./scripts/redeploy.sh v1.3.0   # versión explícita (no usa el SHA git)
 ```
+
+Útil cuando querés publicar una release con tag específico (ej. `v1.0.0-rc1`) en lugar del SHA derivado del último commit.
+
+### `./scripts/set-version.sh` — solo escribir versión en .env
+
+```bash
+./scripts/set-version.sh v1.3.0 --no-build
+```
+
+> Nota: con el flujo automático nuevo, escribir en `.env` solo afecta el fallback. La versión real la determina `agent-assets` desde el SHA git.
 
 ---
 

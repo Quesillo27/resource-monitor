@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 
 	"resource-monitor/backend/internal/config"
@@ -13,6 +14,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
+
+// versionFilePath es donde agent-assets escribe la versión activa tras compilar.
+// Lo monta el compose como volumen read-only (agent-downloads).
+const versionFilePath = "/downloads/version.txt"
+
+// currentLatestVersion devuelve la versión actualmente publicada en /downloads/.
+// Prefiere el archivo (lo escribe agent-assets en cada build), y si no existe
+// cae al valor del entorno AGENT_RELEASE_VERSION (compatibilidad).
+func (s *Server) currentLatestVersion() string {
+	if data, err := os.ReadFile(versionFilePath); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			return v
+		}
+	}
+	return s.cfg.AgentReleaseVersion
+}
 
 type Server struct {
 	cfg   config.Config
@@ -581,6 +598,13 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentVersion != "" {
 		_ = s.store.UpdateAgentVersion(r.Context(), agentID, req.AgentVersion)
+
+		// Auto-update: si la versión del agente difiere de la latest publicada,
+		// encolar comando "update". EnqueueAgentCommand es idempotente (no duplica
+		// si ya hay uno pending o delivered).
+		if latest := s.currentLatestVersion(); latest != "" && req.AgentVersion != latest {
+			_, _ = s.store.EnqueueAgentCommand(r.Context(), agentID, "update", nil)
+		}
 	}
 	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -686,7 +710,7 @@ func (s *Server) getAgentInventory(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) agentVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
-		"version": s.cfg.AgentReleaseVersion,
+		"version": s.currentLatestVersion(),
 	})
 }
 

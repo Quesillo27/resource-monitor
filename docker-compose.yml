@@ -26,6 +26,8 @@ services:
       SERVER_ADDR: ":8080"
     ports:
       - "8080:8080"
+    volumes:
+      - agent-downloads:/downloads:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -36,19 +38,39 @@ services:
     volumes:
       - ./agent:/src/agent:ro
       - ./scripts:/src/scripts:ro
+      - ./.git:/src/.git:ro
       - agent-downloads:/downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /downloads/version.txt"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
     command: >
-      sh -c "apk add --no-cache git ca-certificates &&
-      cp -R /src/agent/. /work/agent/ &&
-      go mod tidy &&
-      GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
-      GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
-      GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-darwin-amd64 ./cmd/agent &&
-      GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -o /downloads/resource-monitor-agent-darwin-arm64 ./cmd/agent &&
-      cd /downloads && sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe resource-monitor-agent-darwin-amd64 resource-monitor-agent-darwin-arm64 > checksums.txt &&
-      cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
-      cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&
-      chmod 0644 /downloads/*"
+      sh -c "apk add --no-cache git ca-certificates >/dev/null &&
+      LAST_SHA='' &&
+      while true; do
+        CURRENT_SHA=$$(cd /src && git rev-parse --short HEAD 2>/dev/null || echo unknown);
+        if [ \"$$CURRENT_SHA\" != \"$$LAST_SHA\" ]; then
+          VERSION=\"v1.0.0-$$CURRENT_SHA\";
+          echo \"[agent-assets] $$LAST_SHA -> $$CURRENT_SHA (compilando $$VERSION)\";
+          rm -rf /work/agent && mkdir -p /work/agent && cp -R /src/agent/. /work/agent/ &&
+          cd /work/agent && go mod tidy &&
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-darwin-amd64 ./cmd/agent &&
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-darwin-arm64 ./cmd/agent &&
+          cd /downloads && sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe resource-monitor-agent-darwin-amd64 resource-monitor-agent-darwin-arm64 > checksums.txt &&
+          cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
+          cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&
+          chmod 0644 /downloads/* &&
+          printf '%s' \"$$VERSION\" > /downloads/version.txt &&
+          LAST_SHA=$$CURRENT_SHA &&
+          echo \"[agent-assets] listo: $$VERSION\";
+        fi;
+        sleep 15;
+      done"
 
   frontend:
     build:
@@ -63,7 +85,7 @@ services:
       backend:
         condition: service_started
       agent-assets:
-        condition: service_completed_successfully
+        condition: service_healthy
 
 volumes:
   postgres-data:
