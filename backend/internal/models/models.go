@@ -115,11 +115,12 @@ type AgentAuthResponse struct {
 }
 
 type HeartbeatRequest struct {
-	Name          string `json:"name"`
-	Hostname      string `json:"hostname"`
-	OS            string `json:"os"`
-	Arch          string `json:"arch"`
-	UptimeSeconds uint64 `json:"uptime_seconds"`
+	Name              string `json:"name"`
+	Hostname          string `json:"hostname"`
+	OS                string `json:"os"`
+	Arch              string `json:"arch"`
+	UptimeSeconds     uint64 `json:"uptime_seconds"`
+	AgentUptimeSec    uint64 `json:"agent_uptime_seconds,omitempty"`
 }
 
 type MetricsRequest struct {
@@ -152,6 +153,8 @@ type NetMetric struct {
 	Name       string     `json:"name"`
 	BytesSent  uint64     `json:"bytes_sent"`
 	BytesRecv  uint64     `json:"bytes_recv"`
+	SentMbps   float64    `json:"sent_mbps,omitempty"`
+	RecvMbps   float64    `json:"recv_mbps,omitempty"`
 	Up         bool       `json:"up"`
 	Active     bool       `json:"active,omitempty"`
 	Hidden     bool       `json:"hidden,omitempty"`
