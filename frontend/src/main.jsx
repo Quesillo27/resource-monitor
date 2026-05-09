@@ -1965,10 +1965,35 @@ function EnrollResult({ result, platform }) {
 
 function CommandBlock({ title, command }) {
   const [copied, setCopied] = useState(false);
-  function copy() {
-    navigator.clipboard?.writeText(command);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const [error, setError] = useState(false);
+  async function copy() {
+    setError(false);
+    let ok = false;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(command);
+        ok = true;
+      } else {
+        // Fallback para contextos sin Clipboard API (HTTP, iframes, navegadores viejos)
+        const ta = document.createElement('textarea');
+        ta.value = command;
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      setError(true);
+      setTimeout(() => setError(false), 2500);
+    }
   }
   return (
     <div className="command-box">
@@ -1976,9 +2001,14 @@ function CommandBlock({ title, command }) {
         <span className="command-title">{title}</span>
         <code>{command}</code>
       </div>
-      <button className={`copy-btn ${copied ? 'copied' : ''}`} title="Copiar" aria-label="Copiar comando" onClick={copy}>
+      <button
+        className={`copy-btn ${copied ? 'copied' : ''} ${error ? 'failed' : ''}`}
+        title="Copiar"
+        aria-label="Copiar comando"
+        onClick={copy}
+      >
         <Copy size={16} />
-        {copied ? 'Copiado' : 'Copiar'}
+        {error ? 'Error' : copied ? 'Copiado' : 'Copiar'}
       </button>
     </div>
   );
