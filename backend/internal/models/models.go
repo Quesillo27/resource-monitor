@@ -115,12 +115,13 @@ type AgentAuthResponse struct {
 }
 
 type HeartbeatRequest struct {
-	Name              string `json:"name"`
-	Hostname          string `json:"hostname"`
-	OS                string `json:"os"`
-	Arch              string `json:"arch"`
-	UptimeSeconds     uint64 `json:"uptime_seconds"`
-	AgentUptimeSec    uint64 `json:"agent_uptime_seconds,omitempty"`
+	Name           string `json:"name"`
+	Hostname       string `json:"hostname"`
+	OS             string `json:"os"`
+	Arch           string `json:"arch"`
+	UptimeSeconds  uint64 `json:"uptime_seconds"`
+	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
 }
 
 type MetricsRequest struct {
@@ -195,6 +196,7 @@ type Agent struct {
 	ActiveAlerts  int        `json:"active_alerts"`
 	DiskCount     int        `json:"disk_count"`
 	Tags          []string   `json:"tags"`
+	AgentVersion  string     `json:"agent_version,omitempty"`
 }
 
 type Alert struct {

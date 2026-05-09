@@ -458,6 +458,47 @@ button.kpi.clickable:hover {
   width: 10px;
 }
 
+/* ── Versión / botón actualizar agente ── */
+.version-cell {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.version-cell code {
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.version-cell code.version-old {
+  background: rgba(245, 158, 11, 0.15);
+  color: var(--amber);
+}
+.btn-update {
+  background: var(--amber);
+  border: 0;
+  border-radius: 4px;
+  color: #1f2937;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  transition: background 0.15s;
+}
+.btn-update:hover { background: #fbbf24; }
+.btn-update:disabled { cursor: wait; opacity: 0.6; }
+
+.version-banner {
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+.version-banner strong { color: var(--accent); }
+
 /* ── Heatmap 24h ── */
 .heatmap {
   display: grid;

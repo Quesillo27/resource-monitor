@@ -62,6 +62,8 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin", "operator")).Delete("/agents/{id}", s.deleteAgent)
 			r.With(s.requireRole("admin", "operator")).Post("/enrollment-tokens", s.createEnrollmentToken)
 			r.Get("/agents/{id}/inventory", s.getAgentInventory)
+			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/commands", s.enqueueAgentCommand)
+			r.Get("/agents/{id}/commands", s.listAgentCommands)
 
 			r.With(s.requireRole("admin")).Put("/alert-rules/defaults", s.saveDefaultAlertRules)
 			r.With(s.requireRole("admin")).Get("/alert-settings/smtp", s.getSMTPSettings)
@@ -87,6 +89,7 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/agent/metrics", s.metrics)
 			r.Post("/agent/inventory", s.agentInventory)
 			r.Post("/agent/offline", s.agentOfflineNotice)
+			r.Post("/agent/commands/{id}/result", s.agentCommandResult)
 		})
 	})
 
@@ -576,7 +579,59 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	if req.AgentVersion != "" {
+		_ = s.store.UpdateAgentVersion(r.Context(), agentID, req.AgentVersion)
+	}
+	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":   "ok",
+		"commands": commands,
+	})
+}
+
+func (s *Server) agentCommandResult(w http.ResponseWriter, r *http.Request) {
+	agentID, _ := r.Context().Value(agentIDKey{}).(string)
+	commandID := chi.URLParam(r, "id")
+	var req struct {
+		OK     bool           `json:"ok"`
+		Result map[string]any `json:"result"`
+		Error  string         `json:"error"`
+	}
+	_ = decodeJSON(w, r, &req)
+	if err := s.store.CompleteAgentCommand(r.Context(), agentID, commandID, req.OK, req.Result, req.Error); err != nil {
+		writeError(w, http.StatusInternalServerError, "result save failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// enqueueAgentCommand permite al admin disparar un comando remoto a un agente
+// (update, restart, reload-config, etc).
+func (s *Server) enqueueAgentCommand(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	var req struct {
+		Command string         `json:"command"`
+		Params  map[string]any `json:"params"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	row, err := s.store.EnqueueAgentCommand(r.Context(), agentID, req.Command, req.Params)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, row)
+}
+
+func (s *Server) listAgentCommands(w http.ResponseWriter, r *http.Request) {
+	agentID := chi.URLParam(r, "id")
+	rows, err := s.store.ListAgentCommands(r.Context(), agentID, 30)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list commands failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"commands": rows})
 }
 
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {

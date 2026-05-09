@@ -68,6 +68,20 @@ func (s *Store) ensureRuntimeSchema(ctx context.Context) error {
 		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_total_bytes BIGINT NOT NULL DEFAULT 0",
 		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_bytes BIGINT NOT NULL DEFAULT 0",
 		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
+		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_version TEXT DEFAULT ''",
+		`CREATE TABLE IF NOT EXISTS agent_commands (
+			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+			command      TEXT NOT NULL,
+			params       JSONB DEFAULT '{}'::jsonb,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+			delivered_at TIMESTAMPTZ,
+			completed_at TIMESTAMPTZ,
+			result       JSONB,
+			error        TEXT
+		)`,
+		"CREATE INDEX IF NOT EXISTS idx_agent_commands_agent_status ON agent_commands(agent_id, status, created_at)",
 		`CREATE TABLE IF NOT EXISTS network_samples (
 			id BIGSERIAL PRIMARY KEY,
 			metric_sample_id BIGINT NOT NULL REFERENCES metric_samples(id) ON DELETE CASCADE,
@@ -407,7 +421,8 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		       CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
 		            THEN 'offline' ELSE a.status END AS effective_status,
 		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent, l.captured_at,
-		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}')
+		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}'),
+		       COALESCE(a.agent_version, '')
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
 		LEFT JOIN alert_counts ac ON ac.agent_id = a.id
@@ -425,7 +440,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 	for rows.Next() {
 		var agent models.Agent
 		var uptime int64
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags); err != nil {
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion); err != nil {
 			return nil, err
 		}
 		if agent.Tags == nil {

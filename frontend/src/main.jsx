@@ -360,10 +360,28 @@ function useSparkline(agentId, api) {
   return { data, load };
 }
 
-function AgentRow({ agent, api, onSelect }) {
+function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
   const { data: sparkPoints, load } = useSparkline(agent.id, api);
   const sparkColor = agent.status === 'critical' ? '#ef4444' : agent.status === 'warning' ? '#f59e0b' : '#3b82f6';
   const alerts = agent.active_alerts ?? 0;
+  const [updating, setUpdating] = useState(false);
+  const currentVersion = agent.agent_version || '—';
+  const needsUpdate = latestVersion && agent.agent_version && agent.agent_version !== latestVersion;
+
+  async function triggerUpdate(e) {
+    e.stopPropagation();
+    if (!window.confirm(`¿Actualizar agente "${agent.name}" de ${currentVersion} a ${latestVersion}?`)) return;
+    setUpdating(true);
+    try {
+      await api.post(`/api/agents/${agent.id}/commands`, { command: 'update' });
+      onUpdated && onUpdated();
+    } catch (err) {
+      window.alert(`Error: ${err.message}`);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
   return (
     <tr onMouseEnter={load} className="agent-row" onClick={() => onSelect(agent.id)}>
       <td className="agent-cell-name"><strong>{agent.name}</strong><span>{agent.hostname}</span></td>
@@ -376,6 +394,21 @@ function AgentRow({ agent, api, onSelect }) {
       <td className="hide-lg">
         <div className="tag-cell">
           {(agent.tags || []).map((t) => <span key={t} className="agent-tag">{t}</span>)}
+        </div>
+      </td>
+      <td className="hide-md">
+        <div className="version-cell">
+          <code className={needsUpdate ? 'version-old' : ''}>{currentVersion}</code>
+          {needsUpdate && (
+            <button
+              className="btn-update"
+              disabled={updating}
+              onClick={triggerUpdate}
+              title={`Actualizar a ${latestVersion}`}
+            >
+              {updating ? '…' : '↑ actualizar'}
+            </button>
+          )}
         </div>
       </td>
       <td className="text-muted hide-md">{date(agent.last_metric_at)}</td>
@@ -392,6 +425,8 @@ function Agents({ api, onSelect, initialFilter = 'all' }) {
   const [tagFilter, setTagFilter] = useState('');
   const [osFilter, setOsFilter] = useState('');
   const { data: tagsData } = useLoad(() => api.get('/api/tags'), [], 0);
+  const { data: versionData } = useLoad(() => api.get('/api/agent/version').catch(() => ({})), [], 0);
+  const latestVersion = versionData?.version || '';
   const availableTags = tagsData?.tags || [];
   const { data, loading, reload, lastUpdated } = useLoad(() => {
     let url = `/api/agents?q=${encodeURIComponent(query)}`;
@@ -432,14 +467,19 @@ function Agents({ api, onSelect, initialFilter = 'all' }) {
           )}
         </div>
       </div>
+      {latestVersion && (
+        <div className="version-banner">
+          Última versión disponible del agente: <strong>{latestVersion}</strong>
+        </div>
+      )}
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Equipo</th><th>Estado</th><th className="hide-md">OS</th><th>CPU</th><th>RAM</th><th className="hide-md">Discos</th><th>Alertas</th><th className="hide-lg">Grupos</th><th className="hide-md">Ultima metrica</th><th className="hide-lg">Heartbeat</th><th className="hide-md">CPU 24h</th></tr></thead>
+          <thead><tr><th>Equipo</th><th>Estado</th><th className="hide-md">OS</th><th>CPU</th><th>RAM</th><th className="hide-md">Discos</th><th>Alertas</th><th className="hide-lg">Grupos</th><th className="hide-md">Versión</th><th className="hide-md">Ultima metrica</th><th className="hide-lg">Heartbeat</th><th className="hide-md">CPU 24h</th></tr></thead>
           <tbody>
             {filtered.map((agent) => (
-              <AgentRow key={agent.id} agent={agent} api={api} onSelect={onSelect} />
+              <AgentRow key={agent.id} agent={agent} api={api} onSelect={onSelect} latestVersion={latestVersion} onUpdated={reload} />
             ))}
-            {!filtered.length && <tr><td colSpan="11" className="empty">Sin equipos registrados</td></tr>}
+            {!filtered.length && <tr><td colSpan="12" className="empty">Sin equipos registrados</td></tr>}
           </tbody>
         </table>
       </div>

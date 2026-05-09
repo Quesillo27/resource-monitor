@@ -174,9 +174,14 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	if cfg.Name != "" {
 		info.Name = cfg.Name
 	}
+	info.AgentVersion = version.Version
 	api := newClient(cfg)
-	if err := api.Heartbeat(ctx, info); err != nil {
+	resp, err := api.HeartbeatWithCommands(ctx, info)
+	if err != nil {
 		return err
+	}
+	if resp != nil && len(resp.Commands) > 0 {
+		go processCommands(cfg, resp.Commands)
 	}
 	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {
@@ -186,6 +191,59 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 		return err
 	}
 	return nil
+}
+
+// processCommands ejecuta los comandos enviados por el manager. Corre en
+// goroutine para no bloquear el ciclo de métricas.
+func processCommands(cfg config.Config, commands []client.AgentCommand) {
+	api := newClient(cfg)
+	for _, cmd := range commands {
+		log.Printf("command received id=%s command=%s", cmd.ID, cmd.Command)
+		ok, result, errMsg := runCommand(cfg, cmd)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if err := api.CompleteCommand(ctx, cmd.ID, ok, result, errMsg); err != nil {
+			log.Printf("complete command %s failed: %v", cmd.ID, err)
+		}
+		cancel()
+	}
+}
+
+func runCommand(cfg config.Config, cmd client.AgentCommand) (bool, map[string]any, string) {
+	switch cmd.Command {
+	case "update":
+		return handleUpdateCommand(cfg)
+	case "restart":
+		// no-op explícito: el agente no se mata a sí mismo, deja que el
+		// service manager lo reinicie cuando pierda contacto. Útil para
+		// disparar un reload sin downtime real.
+		return true, map[string]any{"action": "restart_acknowledged"}, ""
+	case "ping":
+		return true, map[string]any{"pong": time.Now().UTC().Format(time.RFC3339)}, ""
+	default:
+		return false, nil, "unknown command: " + cmd.Command
+	}
+}
+
+func handleUpdateCommand(cfg config.Config) (bool, map[string]any, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	latest, has, err := updater.CheckLatest(ctx, cfg.ServerURL, version.Version)
+	if err != nil {
+		return false, nil, "check latest: " + err.Error()
+	}
+	if !has {
+		return true, map[string]any{"current": version.Version, "latest": latest, "skipped": "already up to date"}, ""
+	}
+	tempBin, err := updater.SelfUpdate(ctx, cfg.ServerURL)
+	if err != nil {
+		return false, nil, "self-update: " + err.Error()
+	}
+	log.Printf("self-update applied: %s -> %s (temp=%s)", version.Version, latest, tempBin)
+	// En Linux disparar restart explícito (en Windows el helper lo hace).
+	if err := updater.RestartLinuxService(ctx); err == nil {
+		log.Printf("systemctl restart issued")
+	}
+	return true, map[string]any{"from": version.Version, "to": latest}, ""
 }
 
 func bufferLatest(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {

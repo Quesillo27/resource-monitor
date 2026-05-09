@@ -63,8 +63,37 @@ func (c *Client) Register(ctx context.Context, token string, host collector.Host
 	return result, err
 }
 
+// HeartbeatResponse contiene los comandos pendientes que el server le entrega
+// al agente en respuesta al heartbeat. Usar Heartbeat() (sin response) para
+// llamadas que no necesitan procesarlos.
+type HeartbeatResponse struct {
+	Status   string         `json:"status"`
+	Commands []AgentCommand `json:"commands,omitempty"`
+}
+
+type AgentCommand struct {
+	ID      string         `json:"id"`
+	Command string         `json:"command"`
+	Params  map[string]any `json:"params,omitempty"`
+}
+
 func (c *Client) Heartbeat(ctx context.Context, host collector.Host) error {
 	return c.post(ctx, "/api/agent/heartbeat", host, true, nil)
+}
+
+// HeartbeatWithCommands envía el heartbeat y devuelve los comandos pendientes.
+func (c *Client) HeartbeatWithCommands(ctx context.Context, host collector.Host) (*HeartbeatResponse, error) {
+	var resp HeartbeatResponse
+	if err := c.post(ctx, "/api/agent/heartbeat", host, true, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CompleteCommand reporta el resultado de un comando ejecutado.
+func (c *Client) CompleteCommand(ctx context.Context, commandID string, ok bool, result map[string]any, errMsg string) error {
+	payload := map[string]any{"ok": ok, "result": result, "error": errMsg}
+	return c.post(ctx, "/api/agent/commands/"+commandID+"/result", payload, true, nil)
 }
 
 func (c *Client) SendMetrics(ctx context.Context, metrics collector.Metrics) error {

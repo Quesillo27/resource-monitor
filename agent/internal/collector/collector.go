@@ -31,6 +31,7 @@ type Host struct {
 	Arch           string `json:"arch"`
 	UptimeSeconds  uint64 `json:"uptime_seconds"`
 	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
 }
 
 type Metrics struct {
