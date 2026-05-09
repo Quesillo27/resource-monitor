@@ -52,6 +52,13 @@ func (s *Server) Routes() http.Handler {
 	})
 	r.Get("/api/agent/version", s.agentVersion)
 
+	// Sirve los binarios del agente y checksums.txt desde el volumen
+	// agent-downloads (montado en /downloads). Esto permite que los agentes
+	// apunten directamente al backend para self-update sin pasar por el
+	// frontend nginx.
+	downloadsFS := http.FileServer(http.Dir("/downloads"))
+	r.Get("/downloads/*", http.StripPrefix("/downloads/", downloadsFS).ServeHTTP)
+
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/login", s.login)
 
