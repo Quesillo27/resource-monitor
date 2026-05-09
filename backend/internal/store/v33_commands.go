@@ -208,6 +208,20 @@ func (s *Store) ListAgentCommands(ctx context.Context, agentID string, limit int
 	return out, nil
 }
 
+func stringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+func timeValue(t *time.Time) time.Time {
+	if t == nil {
+		return time.Time{}
+	}
+	return *t
+}
+
 // UpdateAgentVersion guarda la versión reportada por el agente en heartbeat.
 func (s *Store) UpdateAgentVersion(ctx context.Context, agentID, version string) error {
 	if err := s.EnsureV33Schema(ctx); err != nil {

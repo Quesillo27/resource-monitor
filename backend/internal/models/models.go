@@ -195,8 +195,21 @@ type Agent struct {
 	LastMetricAt  *time.Time `json:"last_metric_at,omitempty"`
 	ActiveAlerts  int        `json:"active_alerts"`
 	DiskCount     int        `json:"disk_count"`
-	Tags          []string   `json:"tags"`
-	AgentVersion  string     `json:"agent_version,omitempty"`
+	Tags          []string      `json:"tags"`
+	AgentVersion  string        `json:"agent_version,omitempty"`
+	LastCommand   *AgentCommandSummary `json:"last_command,omitempty"`
+}
+
+// AgentCommandSummary expone el último comando del agente al frontend para
+// mostrar estado en vivo (pendiente/ejecutando/completado/fallido) sin cargar
+// el historial completo.
+type AgentCommandSummary struct {
+	ID          string     `json:"id"`
+	Command     string     `json:"command"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+	Error       string     `json:"error,omitempty"`
 }
 
 type Alert struct {

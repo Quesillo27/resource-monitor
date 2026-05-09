@@ -416,17 +416,25 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		  SELECT agent_id, count(*)::int AS disk_count
 		  FROM latest_disks
 		  GROUP BY agent_id
+		), last_cmd AS (
+		  SELECT DISTINCT ON (agent_id) agent_id, id::text, command, status, created_at, completed_at, COALESCE(error, '') AS error
+		  FROM agent_commands
+		  WHERE status IN ('pending','delivered')
+		     OR (status IN ('completed','failed') AND created_at > now() - interval '5 minutes')
+		  ORDER BY agent_id, created_at DESC
 		)
 		SELECT a.id::text, a.name, a.hostname, a.os, a.arch, a.uptime_seconds,
 		       CASE WHEN a.last_seen_at IS NULL OR a.last_seen_at < now() - ($1::int * interval '1 second')
 		            THEN 'offline' ELSE a.status END AS effective_status,
 		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent, l.captured_at,
 		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}'),
-		       COALESCE(a.agent_version, '')
+		       COALESCE(a.agent_version, ''),
+		       lc.id, lc.command, lc.status, lc.created_at, lc.completed_at, lc.error
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
 		LEFT JOIN alert_counts ac ON ac.agent_id = a.id
 		LEFT JOIN disk_counts dc ON dc.agent_id = a.id
+		LEFT JOIN last_cmd lc ON lc.agent_id = a.id
 		WHERE ($2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%')
 		  AND ($3 = '' OR $3 = ANY(a.tags))
 		ORDER BY a.last_seen_at DESC NULLS LAST, a.name
@@ -440,8 +448,21 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 	for rows.Next() {
 		var agent models.Agent
 		var uptime int64
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion); err != nil {
+		var cmdID, cmdCommand, cmdStatus, cmdError *string
+		var cmdCreated, cmdCompleted *time.Time
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion,
+			&cmdID, &cmdCommand, &cmdStatus, &cmdCreated, &cmdCompleted, &cmdError); err != nil {
 			return nil, err
+		}
+		if cmdID != nil && *cmdID != "" {
+			agent.LastCommand = &models.AgentCommandSummary{
+				ID:          *cmdID,
+				Command:     stringValue(cmdCommand),
+				Status:      stringValue(cmdStatus),
+				CreatedAt:   timeValue(cmdCreated),
+				CompletedAt: cmdCompleted,
+				Error:       stringValue(cmdError),
+			}
 		}
 		if agent.Tags == nil {
 			agent.Tags = []string{}

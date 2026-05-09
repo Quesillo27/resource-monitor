@@ -367,6 +367,10 @@ function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
   const [updating, setUpdating] = useState(false);
   const currentVersion = agent.agent_version || '—';
   const needsUpdate = latestVersion && agent.agent_version && agent.agent_version !== latestVersion;
+  const lastCmd = agent.last_command || null;
+  const cmdActive = lastCmd && (lastCmd.status === 'pending' || lastCmd.status === 'delivered');
+  const cmdFailed = lastCmd && lastCmd.status === 'failed';
+  const cmdRecentSuccess = lastCmd && lastCmd.status === 'completed';
 
   async function triggerUpdate(e) {
     e.stopPropagation();
@@ -399,7 +403,19 @@ function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
       <td className="hide-md">
         <div className="version-cell">
           <code className={needsUpdate ? 'version-old' : ''}>{currentVersion}</code>
-          {needsUpdate && (
+          {cmdActive ? (
+            <span className={`cmd-badge cmd-${lastCmd.status}`} title={`comando ${lastCmd.command} desde ${date(lastCmd.created_at)}`}>
+              <span className="cmd-spinner" /> {lastCmd.command} {lastCmd.status === 'pending' ? 'pendiente' : 'ejecutando'}
+            </span>
+          ) : cmdFailed ? (
+            <span className="cmd-badge cmd-failed" title={lastCmd.error || 'fallo'}>
+              ✗ {lastCmd.command} falló
+            </span>
+          ) : cmdRecentSuccess ? (
+            <span className="cmd-badge cmd-completed" title={`completado ${date(lastCmd.completed_at)}`}>
+              ✓ {lastCmd.command} OK
+            </span>
+          ) : needsUpdate ? (
             <button
               className="btn-update"
               disabled={updating}
@@ -408,7 +424,7 @@ function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
             >
               {updating ? '…' : '↑ actualizar'}
             </button>
-          )}
+          ) : null}
         </div>
       </td>
       <td className="text-muted hide-md">{date(agent.last_metric_at)}</td>
