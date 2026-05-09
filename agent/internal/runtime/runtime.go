@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"runtime"
 	"time"
 
 	"resource-monitor/agent/internal/buffer"
@@ -240,8 +241,19 @@ func handleUpdateCommand(cfg config.Config) (bool, map[string]any, string) {
 	}
 	log.Printf("self-update applied: %s -> %s (temp=%s)", version.Version, latest, tempBin)
 	// En Linux disparar restart explícito (en Windows el helper lo hace).
-	if err := updater.RestartLinuxService(ctx); err == nil {
-		log.Printf("systemctl restart issued")
+	// IMPORTANTE: el restart se ejecuta en una goroutine con delay para que
+	// processCommands alcance a hacer api.CompleteCommand antes de que systemd
+	// mate al proceso. Sin este delay, el comando queda marcado como "failed"
+	// aunque el self-update haya sido exitoso.
+	if runtime.GOOS == "linux" {
+		go func() {
+			time.Sleep(3 * time.Second)
+			if err := updater.RestartLinuxService(context.Background()); err != nil {
+				log.Printf("systemctl restart failed: %v", err)
+			} else {
+				log.Printf("systemctl restart issued")
+			}
+		}()
 	}
 	return true, map[string]any{"from": version.Version, "to": latest}, ""
 }

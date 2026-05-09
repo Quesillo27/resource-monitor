@@ -403,28 +403,31 @@ function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
       <td className="hide-md">
         <div className="version-cell">
           <code className={needsUpdate ? 'version-old' : ''}>{currentVersion}</code>
-          {cmdActive ? (
+          {cmdActive && (
             <span className={`cmd-badge cmd-${lastCmd.status}`} title={`comando ${lastCmd.command} desde ${date(lastCmd.created_at)}`}>
               <span className="cmd-spinner" /> {lastCmd.command} {lastCmd.status === 'pending' ? 'pendiente' : 'ejecutando'}
             </span>
-          ) : cmdFailed ? (
+          )}
+          {cmdFailed && (
             <span className="cmd-badge cmd-failed" title={lastCmd.error || 'fallo'}>
               ✗ {lastCmd.command} falló
             </span>
-          ) : cmdRecentSuccess ? (
+          )}
+          {cmdRecentSuccess && !needsUpdate && (
             <span className="cmd-badge cmd-completed" title={`completado ${date(lastCmd.completed_at)}`}>
               ✓ {lastCmd.command} OK
             </span>
-          ) : needsUpdate ? (
+          )}
+          {needsUpdate && !cmdActive && (
             <button
               className="btn-update"
               disabled={updating}
               onClick={triggerUpdate}
-              title={`Actualizar a ${latestVersion}`}
+              title={cmdFailed ? `Reintentar update a ${latestVersion} (último error: ${lastCmd.error || 'desconocido'})` : `Actualizar a ${latestVersion}`}
             >
-              {updating ? '…' : '↑ actualizar'}
+              {updating ? '…' : cmdFailed ? '↻ reintentar' : '↑ actualizar'}
             </button>
-          ) : null}
+          )}
         </div>
       </td>
       <td className="text-muted hide-md">{date(agent.last_metric_at)}</td>

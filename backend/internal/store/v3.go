@@ -136,20 +136,33 @@ func (s *Store) DashboardOverview(ctx context.Context, offlineAfterSeconds int) 
 	return summary, nil
 }
 
+// linuxDistros: keywords que identifican distribuciones Linux. Si el string
+// del OS contiene alguno (case-insensitive), se categoriza como "linux".
+// Mantener ordenado alfabéticamente y agregar nuevas distros aquí.
+var linuxDistros = []string{
+	"alma", "alpine", "amazon", "arch", "centos", "debian", "fedora",
+	"gentoo", "kali", "linux", "manjaro", "mint", "opensuse", "oracle",
+	"pop!_os", "popos", "raspbian", "redhat", "rhel", "rocky", "slackware",
+	"suse", "ubuntu", "void",
+}
+
 func osFamilyV3(os string) string {
 	o := strings.ToLower(strings.TrimSpace(os))
-	switch {
-	case o == "":
+	if o == "" {
 		return "desconocido"
-	case strings.Contains(o, "windows"):
-		return "windows"
-	case strings.Contains(o, "darwin") || strings.Contains(o, "mac"):
-		return "macos"
-	case strings.Contains(o, "ubuntu") || strings.Contains(o, "debian") || strings.Contains(o, "rhel") || strings.Contains(o, "centos") || strings.Contains(o, "alpine") || strings.Contains(o, "linux"):
-		return "linux"
-	default:
-		return "otro"
 	}
+	if strings.Contains(o, "windows") {
+		return "windows"
+	}
+	if strings.Contains(o, "darwin") || strings.Contains(o, "mac") {
+		return "macos"
+	}
+	for _, d := range linuxDistros {
+		if strings.Contains(o, d) {
+			return "linux"
+		}
+	}
+	return "otro"
 }
 
 func (s *Store) dashboardCapacity(ctx context.Context) (map[string]any, error) {
