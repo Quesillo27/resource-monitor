@@ -433,7 +433,11 @@ func (s *Store) historyMetricsV3(ctx context.Context, agentID, window, bucket st
 	rows, err := s.pool.Query(ctx, `
 		SELECT date_bin($3::interval, captured_at, timestamptz '2000-01-01') AS bucket,
 		       avg(cpu_percent), avg(memory_used_percent), avg(swap_used_percent), max(captured_at),
-		       avg(gateway_latency_ms)
+		       avg(gateway_latency_ms),
+		       coalesce(avg(memory_used_bytes::float8)::bigint, 0) AS memory_used_bytes,
+		       coalesce(max(memory_total_bytes), 0) AS memory_total_bytes,
+		       coalesce(avg(swap_used_bytes::float8)::bigint, 0) AS swap_used_bytes,
+		       coalesce(max(swap_total_bytes), 0) AS swap_total_bytes
 		FROM metric_samples
 		WHERE agent_id = $1 AND captured_at >= now() - $2::interval
 		GROUP BY bucket
@@ -448,7 +452,9 @@ func (s *Store) historyMetricsV3(ctx context.Context, agentID, window, bucket st
 		var capturedAt, lastSeen time.Time
 		var cpu, memory, swap float64
 		var gatewayLatency *float64
-		if err := rows.Scan(&capturedAt, &cpu, &memory, &swap, &lastSeen, &gatewayLatency); err != nil {
+		var memUsedBytes, memTotalBytes, swapUsedBytes, swapTotalBytes int64
+		if err := rows.Scan(&capturedAt, &cpu, &memory, &swap, &lastSeen, &gatewayLatency,
+			&memUsedBytes, &memTotalBytes, &swapUsedBytes, &swapTotalBytes); err != nil {
 			return nil, err
 		}
 		row := map[string]any{
@@ -457,6 +463,10 @@ func (s *Store) historyMetricsV3(ctx context.Context, agentID, window, bucket st
 			"cpu_percent":         cpu,
 			"memory_used_percent": memory,
 			"swap_used_percent":   swap,
+			"memory_used_bytes":   memUsedBytes,
+			"memory_total_bytes":  memTotalBytes,
+			"swap_used_bytes":     swapUsedBytes,
+			"swap_total_bytes":    swapTotalBytes,
 		}
 		if gatewayLatency != nil {
 			row["gateway_latency_ms"] = *gatewayLatency
