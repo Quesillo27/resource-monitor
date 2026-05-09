@@ -63,15 +63,22 @@ services:
           echo \"[agent-assets] $$LAST_SHA -> $$CURRENT_SHA (compilando $$VERSION)\";
           rm -rf /work/agent && mkdir -p /work/agent && cp -R /src/agent/. /work/agent/ &&
           cd /work/agent && go mod tidy &&
-          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-linux-amd64 ./cmd/agent &&
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-windows-amd64.exe ./cmd/agent &&
-          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-darwin-amd64 ./cmd/agent &&
-          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/resource-monitor-agent-darwin-arm64 ./cmd/agent &&
-          cd /downloads && sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe resource-monitor-agent-darwin-amd64 resource-monitor-agent-darwin-arm64 > checksums.txt &&
+          GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/.next-linux-amd64 ./cmd/agent &&
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/.next-windows-amd64.exe ./cmd/agent &&
+          GOOS=darwin  GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/.next-darwin-amd64 ./cmd/agent &&
+          GOOS=darwin  GOARCH=arm64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/.next-darwin-arm64 ./cmd/agent &&
+          cd /downloads &&
+          mv -f .next-linux-amd64       resource-monitor-agent-linux-amd64 &&
+          mv -f .next-windows-amd64.exe resource-monitor-agent-windows-amd64.exe &&
+          mv -f .next-darwin-amd64      resource-monitor-agent-darwin-amd64 &&
+          mv -f .next-darwin-arm64      resource-monitor-agent-darwin-arm64 &&
+          sha256sum resource-monitor-agent-linux-amd64 resource-monitor-agent-windows-amd64.exe resource-monitor-agent-darwin-amd64 resource-monitor-agent-darwin-arm64 > checksums.txt.tmp &&
+          mv -f checksums.txt.tmp checksums.txt &&
           cp /src/scripts/install-agent.sh /downloads/install-agent.sh &&
           cp /src/scripts/install-agent.ps1 /downloads/install-agent.ps1 &&
           chmod 0644 /downloads/* &&
-          printf '%s' \"$$VERSION\" > /downloads/version.txt &&
+          printf '%s' \"$$VERSION\" > /downloads/version.txt.tmp &&
+          mv -f /downloads/version.txt.tmp /downloads/version.txt &&
           LAST_SHA=$$CURRENT_SHA &&
           echo \"[agent-assets] listo: $$VERSION\";
         fi;
