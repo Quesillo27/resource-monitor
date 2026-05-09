@@ -2,8 +2,6 @@
 
 Plataforma de monitoreo de recursos para equipos **Linux, Windows y macOS** con manager web centralizado, agentes Go instalables como servicio, alertas (SMTP + Telegram), inventario de hardware/software y **self-update remoto** desde la consola.
 
-> Demo en producción: https://monitor.toolscode.cloud
-
 ---
 
 ## Componentes
