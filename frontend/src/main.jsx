@@ -408,7 +408,9 @@ function AgentRow({ agent, api, onSelect, latestVersion, onUpdated }) {
               <span className="cmd-spinner" /> {lastCmd.command} {lastCmd.status === 'pending' ? 'pendiente' : 'ejecutando'}
             </span>
           )}
-          {cmdFailed && (
+          {/* Solo mostrar el badge de fallo si la versión sigue desactualizada.
+              Si el agente ya alcanzó la latest, el fallo histórico deja de ser relevante. */}
+          {cmdFailed && needsUpdate && (
             <span className="cmd-badge cmd-failed" title={lastCmd.error || 'fallo'}>
               ✗ {lastCmd.command} falló
             </span>
