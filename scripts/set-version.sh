@@ -10,7 +10,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ENV_FILE=".env"
-COMPOSE_FILE="docker-compose.prod.yml"
+
+# Auto-detección del compose file (igual que redeploy.sh)
+if [[ -z "${COMPOSE_FILE:-}" ]]; then
+  if [[ -f "docker-compose.prod.yml" ]] && docker network inspect resource-monitor >/dev/null 2>&1; then
+    COMPOSE_FILE="docker-compose.prod.yml"
+  elif [[ -f "docker-compose.yml" ]]; then
+    COMPOSE_FILE="docker-compose.yml"
+  elif [[ -f "docker-compose.prod.yml" ]]; then
+    COMPOSE_FILE="docker-compose.prod.yml"
+  fi
+fi
 
 if [[ ! -f "$ENV_FILE" ]]; then
   echo "ERROR: no existe $ENV_FILE en $(pwd)" >&2
@@ -43,8 +53,8 @@ if [[ "$SKIP_BUILD" -eq 1 ]]; then
   exit 0
 fi
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "ERROR: no existe $COMPOSE_FILE — no puedo rebuildear" >&2
+if [[ -z "${COMPOSE_FILE:-}" ]] || [[ ! -f "$COMPOSE_FILE" ]]; then
+  echo "ERROR: no encuentro un docker-compose válido — no puedo rebuildear" >&2
   exit 1
 fi
 

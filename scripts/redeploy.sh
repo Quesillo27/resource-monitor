@@ -13,13 +13,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-COMPOSE_FILE="docker-compose.prod.yml"
 ENV_FILE=".env"
 
-if [[ ! -f "$COMPOSE_FILE" ]]; then
-  echo "ERROR: $COMPOSE_FILE no existe en $(pwd)" >&2
-  exit 1
+# Auto-detección del compose file:
+#   1. Si COMPOSE_FILE está seteado en el entorno, se respeta
+#   2. Si docker-compose.prod.yml existe Y la red externa "resource-monitor" existe → usar prod
+#   3. En cualquier otro caso → usar docker-compose.yml (standalone / dev)
+if [[ -z "${COMPOSE_FILE:-}" ]]; then
+  if [[ -f "docker-compose.prod.yml" ]] && docker network inspect resource-monitor >/dev/null 2>&1; then
+    COMPOSE_FILE="docker-compose.prod.yml"
+  elif [[ -f "docker-compose.yml" ]]; then
+    COMPOSE_FILE="docker-compose.yml"
+  elif [[ -f "docker-compose.prod.yml" ]]; then
+    COMPOSE_FILE="docker-compose.prod.yml"
+  else
+    echo "ERROR: no encuentro docker-compose.yml ni docker-compose.prod.yml en $(pwd)" >&2
+    exit 1
+  fi
 fi
+
+echo "==> Usando $COMPOSE_FILE"
 
 VERSION="${1:-}"
 if [[ -z "$VERSION" ]]; then
