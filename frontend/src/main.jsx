@@ -651,15 +651,15 @@ function agentCommands(os) {
     return [
       'sudo launchctl print system/com.resourcemonitor.agent',
       "log show --predicate 'process == \"resource-monitor-agent\"' --info --last 10m",
-      'resource-monitor-agent status --config /usr/local/etc/resource-monitor-agent/config.json',
-      'resource-monitor-agent doctor --config /usr/local/etc/resource-monitor-agent/config.json',
+      'sudo /usr/local/bin/resource-monitor-agent status --config /usr/local/etc/resource-monitor-agent/config.json',
+      'sudo /usr/local/bin/resource-monitor-agent doctor --config /usr/local/etc/resource-monitor-agent/config.json',
     ];
   }
   return [
     'sudo systemctl status resource-monitor-agent',
     'sudo journalctl -u resource-monitor-agent -f --since "10 min ago"',
-    'resource-monitor-agent status --config /etc/resource-monitor-agent/config.json',
-    'resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json',
+    'sudo /usr/local/bin/resource-monitor-agent status --config /etc/resource-monitor-agent/config.json',
+    'sudo /usr/local/bin/resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json',
   ];
 }
 
@@ -670,20 +670,49 @@ function pickTone(value, warn = 75, crit = 90) {
   return '';
 }
 
-function CommandLine({ cmd }) {
-  const [copied, setCopied] = useState(false);
-  async function doCopy() {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* clipboard no disponible */ }
+function copyTextFallback(text) {
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
   }
+}
+
+function CommandLine({ cmd }) {
+  const [state, setState] = useState('idle'); // 'idle' | 'ok' | 'err'
+  async function doCopy() {
+    let ok = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(cmd);
+        ok = true;
+      } catch {
+        ok = copyTextFallback(cmd);
+      }
+    } else {
+      ok = copyTextFallback(cmd);
+    }
+    setState(ok ? 'ok' : 'err');
+    setTimeout(() => setState('idle'), 1800);
+  }
+  const cls = state === 'ok' ? 'cmd-copy ok' : state === 'err' ? 'cmd-copy err' : 'cmd-copy';
+  const title = state === 'ok' ? 'Copiado' : state === 'err' ? 'No se pudo copiar (selecciona y Ctrl+C)' : 'Copiar al portapapeles';
   return (
     <div className="cmd-row">
       <code>{cmd}</code>
-      <button type="button" className="cmd-copy" onClick={doCopy} title="Copiar al portapapeles" aria-label="Copiar comando">
-        {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+      <button type="button" className={cls} onClick={doCopy} title={title} aria-label={title}>
+        {state === 'ok' ? <CheckCircle2 size={14} /> : <Copy size={14} />}
       </button>
     </div>
   );

@@ -1003,6 +1003,14 @@ tbody tr:last-child td { border-bottom: 0; }
   border-color: #3b82f6;
   color: #3b82f6;
 }
+.cmd-row .cmd-copy.ok {
+  border-color: #10b981;
+  color: #10b981;
+}
+.cmd-row .cmd-copy.err {
+  border-color: #ef4444;
+  color: #ef4444;
+}
 
 /* ── OS chip ── */
 .os-chip {
