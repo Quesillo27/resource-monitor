@@ -162,8 +162,11 @@ function Dashboard({ api, navigateTo }) {
     ? (overview.recent_alerts || []).filter((al) => Array.isArray(al.tags) && al.tags.includes(tagFilter))
     : (overview.recent_alerts || []);
 
-  const total = (Number(counts.online || 0) + Number(counts.warning || 0) + Number(counts.critical || 0) + Number(counts.offline || 0)) || 1;
-  const uptimePct = Math.round((Number(counts.online || 0) / total) * 100);
+  // "Online" = todo lo que reporta heartbeat (online + warning + critical).
+  // Tener alertas no quita que el agente este vivo; solo offline resta uptime.
+  const onlineLike = Number(counts.online || 0) + Number(counts.warning || 0) + Number(counts.critical || 0);
+  const total = (onlineLike + Number(counts.offline || 0)) || 1;
+  const uptimePct = Math.round((onlineLike / total) * 100);
   const alertsTrend = trends.alerts || [];
   const alertsTrendDelta = alertsTrend.length >= 2
     ? alertsTrend.slice(-3).reduce((a, b) => a + b, 0) - alertsTrend.slice(0, 3).reduce((a, b) => a + b, 0)
@@ -190,7 +193,7 @@ function Dashboard({ api, navigateTo }) {
         <article className={`dash-hero-card tone-${stats.critical_agents ? 'critical' : stats.warning_agents ? 'warning' : 'online'}`}>
           <span>Uptime cluster</span>
           <strong>{uptimePct}%</strong>
-          <small>{counts.online || 0} de {total} online</small>
+          <small>{onlineLike} de {total} online</small>
           <StatusDonut counts={counts} />
         </article>
         <article className="dash-hero-card">
@@ -1435,14 +1438,16 @@ function StatusDonut({ counts }) {
   const warning = Number(counts.warning || 0);
   const critical = Number(counts.critical || 0);
   const offline = Number(counts.offline || 0);
-  const total = online + warning + critical + offline || 1;
-  const pct = Math.round((online / total) * 100);
+  // "Online" cuenta cualquier agente que reporta heartbeat (incluso con alertas).
+  const onlineLike = online + warning + critical;
+  const total = onlineLike + offline || 1;
+  const pct = Math.round((onlineLike / total) * 100);
   const tone = critical > 0 ? 'critical' : warning > 0 ? 'warning' : 'online';
   return (
     <div className={`status-donut tone-${tone}`}>
       <Gauge size={36} />
       <span>{pct}%</span>
-      <small>{online} de {total} online</small>
+      <small>{onlineLike} de {total} online</small>
     </div>
   );
 }

@@ -99,6 +99,16 @@ run_update() {
 
   write_status "done" "$FROM" "$TO" "" "$STARTED"
   echo "[updater] DONE $FROM -> $TO"
+
+  # Si el propio script cambio en este pull, recrear el container manager-updater
+  # para que cargue la version nueva. El docker compose mata este container y
+  # arranca uno nuevo con el script actualizado. El status ya quedo en "done"
+  # asi que la UI no ve el restart.
+  CHANGED_FILES="$(cd "$REPO" && git diff --name-only "$FROM" "$TO" 2>/dev/null || echo)"
+  if echo "$CHANGED_FILES" | grep -q "scripts/manager-updater.sh"; then
+    echo "[updater] el script cambio, recreando manager-updater..."
+    (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate manager-updater) &
+  fi
   return 0
 }
 
