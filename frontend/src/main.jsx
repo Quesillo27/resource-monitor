@@ -613,7 +613,7 @@ function AgentDetail({ api, agentId, onBack }) {
           <div className="tab-row">
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
-          {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
+          {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} history={historyData} />}
           {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'disks' && <DisksTable disks={disks} />}
           {tab === 'network' && <NetworkTable networks={networks} />}
@@ -629,24 +629,120 @@ function AgentDetail({ api, agentId, onBack }) {
   );
 }
 
-function SummaryTab({ agent, status, disks, networks, services, alerts }) {
+function detectOS(rawOs) {
+  const s = (rawOs || '').toLowerCase();
+  if (s.includes('windows')) return 'windows';
+  if (s.includes('darwin') || s.includes('mac')) return 'darwin';
+  return 'linux';
+}
+
+const OS_LABEL = { linux: 'Linux', windows: 'Windows', darwin: 'macOS' };
+
+function agentCommands(os) {
+  if (os === 'windows') {
+    return [
+      'Get-Service resource-monitor-agent',
+      'Get-EventLog -LogName Application -Source resource-monitor-agent -Newest 50',
+      '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" status --config "C:\\ProgramData\\resource-monitor-agent\\config.json"',
+      '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" doctor --config "C:\\ProgramData\\resource-monitor-agent\\config.json"',
+    ];
+  }
+  if (os === 'darwin') {
+    return [
+      'sudo launchctl print system/com.resourcemonitor.agent',
+      "log show --predicate 'process == \"resource-monitor-agent\"' --info --last 10m",
+      'resource-monitor-agent status --config /usr/local/etc/resource-monitor-agent/config.json',
+      'resource-monitor-agent doctor --config /usr/local/etc/resource-monitor-agent/config.json',
+    ];
+  }
+  return [
+    'sudo systemctl status resource-monitor-agent',
+    'sudo journalctl -u resource-monitor-agent -f --since "10 min ago"',
+    'resource-monitor-agent status --config /etc/resource-monitor-agent/config.json',
+    'resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json',
+  ];
+}
+
+function pickTone(value, warn = 75, crit = 90) {
+  const v = Number(value || 0);
+  if (v >= crit) return 'bad';
+  if (v >= warn) return 'warn';
+  return '';
+}
+
+function CommandLine({ cmd }) {
+  const [copied, setCopied] = useState(false);
+  async function doCopy() {
+    try {
+      await navigator.clipboard.writeText(cmd);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* clipboard no disponible */ }
+  }
+  return (
+    <div className="cmd-row">
+      <code>{cmd}</code>
+      <button type="button" className="cmd-copy" onClick={doCopy} title="Copiar al portapapeles" aria-label="Copiar comando">
+        {copied ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
+  );
+}
+
+function SummaryTab({ agent, status, disks, networks, services, alerts, history }) {
+  const os = detectOS(agent?.os);
+  const commands = agentCommands(os);
+  const cpuSpark = useMemo(
+    () => (history?.metrics || []).slice(-60).map((p) => Number(p.cpu_percent || 0)),
+    [history]
+  );
+  const ramSpark = useMemo(
+    () => (history?.metrics || []).slice(-60).map((p) => Number(p.memory_used_percent || 0)),
+    [history]
+  );
+  const latestMetric = history?.metrics?.length ? history.metrics[history.metrics.length - 1] : null;
+  const latestNet = history?.network?.length ? history.network[history.network.length - 1] : null;
+
+  const busiestDisk = [...disks].sort((a, b) => Number(b.used_percent || 0) - Number(a.used_percent || 0))[0];
+  const upInterfaces = networks.filter((n) => n.up).length;
+  const downServices = services.filter((s) => s.status !== 'running').length;
+  const hasServices = services.length > 0;
+  const alertsCount = alerts.length;
+
+  const cpu = agent.cpu_percent || 0;
+  const ram = agent.memory_used_percent || 0;
+  const lastSeen = status?.last_seen_at || agent.last_seen_at;
+
   return (
     <>
-      <div className="kpi-grid compact">
-        <Kpi icon={Cpu} label="CPU actual" value={percent(agent.cpu_percent)} />
-        <Kpi icon={MemoryStick} label="RAM actual" value={percent(agent.memory_used_percent)} />
-        <Kpi icon={HardDrive} label="Discos" value={disks.length} />
-        <Kpi icon={Network} label="Interfaces" value={networks.length} />
-        <Kpi icon={Settings} label="Servicios caidos" value={services.filter((s) => s.status !== 'running').length} tone="bad" />
-        <Kpi icon={AlertTriangle} label="Alertas activas" value={alerts.length} tone="bad" />
+      <div className="summary-meta">
+        <Status status={agent.status} />
+        {agent.agent_version && <span><strong>Versión</strong> {agent.agent_version}</span>}
+        {agent.uptime_seconds ? <span><strong>Uptime</strong> {duration(agent.uptime_seconds)}</span> : null}
+        {lastSeen && <span><strong>Último contacto</strong> {relativeTime(new Date(lastSeen))}</span>}
       </div>
-      {status && <div className="diagnostic-band"><span>Ultima metrica: {date(status.last_metric_at)}</span><span>Ultimo heartbeat: {date(status.last_seen_at)}</span><span>Offline despues de: {status.offline_after_seconds}s</span></div>}
-      <Panel title="Diagnostico del agente">
-        <div className="ops-grid">
-          <code>resource-monitor-agent status --config /etc/resource-monitor-agent/config.json</code>
-          <code>resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json</code>
-          <code>journalctl -u resource-monitor-agent -f</code>
-          <code>Get-Service resource-monitor-agent</code>
+
+      <div className="kpi-grid compact">
+        <KpiClick icon={Cpu} label="CPU actual" value={percent(cpu)} tone={pickTone(cpu)} sparkline={cpuSpark} sparkColor="#3b82f6" />
+        <KpiClick icon={MemoryStick} label="RAM actual" value={percent(ram)} tone={pickTone(ram)} sparkline={ramSpark} sparkColor="#a855f7" />
+        <Kpi icon={HardDrive} label="Disco más usado" value={busiestDisk ? `${diskLabel(busiestDisk)} · ${percent(busiestDisk.used_percent)}` : '—'} tone={pickTone(busiestDisk?.used_percent)} />
+        <Kpi icon={Network} label="Interfaces UP" value={networks.length ? `${upInterfaces} / ${networks.length}` : '—'} />
+        <Kpi icon={Activity} label="Latencia GW" value={latestMetric?.gateway_latency_ms != null ? `${Number(latestMetric.gateway_latency_ms).toFixed(1)} ms` : '—'} />
+        <Kpi icon={Gauge} label="Red ↓ / ↑" value={latestNet ? `${rate(latestNet.bytes_recv_per_sec)} / ${rate(latestNet.bytes_sent_per_sec)}` : '—'} />
+        <Kpi icon={Settings} label={hasServices ? 'Servicios caídos' : 'Servicios'} value={hasServices ? `${downServices} / ${services.length}` : 'sin monitoreo'} tone={hasServices && downServices > 0 ? 'bad' : ''} />
+        <Kpi icon={AlertTriangle} label="Alertas activas" value={alertsCount} tone={alertsCount > 0 ? 'bad' : ''} />
+      </div>
+
+      {status && (
+        <div className="diagnostic-band">
+          <span>Último heartbeat: {date(status.last_seen_at)} ({relativeTime(new Date(status.last_seen_at))})</span>
+          <span>Marca offline tras {status.offline_after_seconds}s sin contacto</span>
+        </div>
+      )}
+
+      <Panel title="Diagnóstico del agente" action={<span className="os-chip">{OS_LABEL[os]}</span>}>
+        <div className="cmd-list">
+          {commands.map((cmd) => <CommandLine key={cmd} cmd={cmd} />)}
         </div>
       </Panel>
     </>

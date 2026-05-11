@@ -947,6 +947,76 @@ tbody tr:last-child td { border-bottom: 0; }
   padding: 12px 16px;
 }
 
+/* ── Summary meta ── */
+.summary-meta {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 13px;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.summary-meta strong {
+  color: var(--text-muted, var(--text-secondary));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  margin-right: 6px;
+  text-transform: uppercase;
+}
+
+/* ── Command list ── */
+.cmd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cmd-row {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+}
+.cmd-row code {
+  color: var(--text-primary);
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+.cmd-row .cmd-copy {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  padding: 4px 6px;
+  transition: border-color 120ms, color 120ms;
+}
+.cmd-row .cmd-copy:hover {
+  border-color: #3b82f6;
+  color: #3b82f6;
+}
+
+/* ── OS chip ── */
+.os-chip {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 999px;
+  color: #3b82f6;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 2px 10px;
+  text-transform: uppercase;
+}
+
 /* ── Offline banner ── */
 .offline-banner {
   background: rgba(239, 68, 68, 0.08);
