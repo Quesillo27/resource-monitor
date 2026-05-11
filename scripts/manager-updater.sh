@@ -32,6 +32,35 @@ if ! command -v git >/dev/null 2>&1; then
   }
 fi
 
+# CRITICO: el daemon docker resuelve mounts contra el HOST, no contra este
+# container. Cuando hacemos 'docker compose up' desde aca, el cliente compose
+# resuelve paths relativos ('./agent') contra el cwd del compose file, que para
+# nosotros es /repo. Eso le pasa /repo/agent al daemon — que en el host
+# probablemente esta vacio. Resultado: containers (sobre todo agent-assets)
+# arrancan con mounts apuntando a directorios vacios, sin que se note.
+#
+# Solucion: descubrir el path REAL del host inspeccionando el mount /repo de
+# este propio container, y pasar --project-directory <host_path> en cada
+# llamada de docker compose. El cliente entonces resuelve paths relativos
+# contra ese path absoluto del host, y los manda correctos al daemon.
+HOST_REPO=""
+if [ -f /.dockerenv ] || [ -n "${HOSTNAME:-}" ]; then
+  HOST_REPO="$(docker inspect "$(hostname)" \
+    --format '{{range .Mounts}}{{if eq .Destination "/repo"}}{{.Source}}{{end}}{{end}}' \
+    2>/dev/null || echo)"
+fi
+if [ -z "$HOST_REPO" ]; then
+  echo "[updater] WARN: no pude detectar el path host del repo; uso /repo como fallback" >&2
+  HOST_REPO="$REPO"
+fi
+echo "[updater] HOST_REPO=$HOST_REPO (paths relativos del compose se resuelven contra ese)"
+
+# Wrapper que invoca docker compose con --project-directory apuntando al path
+# host. Reemplaza todas las llamadas anteriores 'cd $REPO && docker compose ...'.
+dc() {
+  docker compose --project-directory "$HOST_REPO" -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"
+}
+
 # /triggers debe ser escribible por el backend (uid 1000) para que pueda
 # crear el archivo trigger. Sticky bit estilo /tmp para que cada proceso
 # borre solo lo suyo.
@@ -75,14 +104,14 @@ run_update() {
   echo "[updater] pulled: $FROM -> $TO"
 
   write_status "building_backend" "$FROM" "$TO" "" "$STARTED"
-  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build backend 2>&1); then
+  if ! dc build backend 2>&1; then
     write_status "failed" "$FROM" "$TO" "build backend falló" "$STARTED"
     echo "[updater] FAIL build backend" >&2
     return 1
   fi
 
   write_status "building_frontend" "$FROM" "$TO" "" "$STARTED"
-  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build frontend 2>&1); then
+  if ! dc build frontend 2>&1; then
     write_status "failed" "$FROM" "$TO" "build frontend falló" "$STARTED"
     echo "[updater] FAIL build frontend" >&2
     return 1
@@ -92,7 +121,7 @@ run_update() {
   # 'up -d' aplica las imágenes nuevas. Pasamos MANAGER_BUILD_SHA al backend
   # para que pueda reportar el sha real que está corriendo (vs. el HEAD del
   # repo del updater, que pueden divergir momentáneamente).
-  if ! (cd "$REPO" && MANAGER_BUILD_SHA="$TO" docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d backend frontend 2>&1); then
+  if ! MANAGER_BUILD_SHA="$TO" dc up -d backend frontend 2>&1; then
     write_status "failed" "$FROM" "$TO" "compose up falló" "$STARTED"
     echo "[updater] FAIL compose up" >&2
     return 1
@@ -112,7 +141,7 @@ run_update() {
   # de path).
   if echo "$CHANGED_FILES" | grep -qE "^(agent/|scripts/install-agent\.)"; then
     echo "[updater] cambios en agent/, recreando agent-assets..."
-    (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate agent-assets 2>&1) || \
+    dc up -d --force-recreate agent-assets 2>&1 || \
       echo "[updater] WARN: no pude recrear agent-assets, su watcher interno intentara compilar" >&2
   fi
 
@@ -122,7 +151,7 @@ run_update() {
   # asi que la UI no ve el restart.
   if echo "$CHANGED_FILES" | grep -q "scripts/manager-updater.sh"; then
     echo "[updater] el script cambio, recreando manager-updater..."
-    (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate manager-updater) &
+    dc up -d --force-recreate manager-updater &
   fi
   return 0
 }
