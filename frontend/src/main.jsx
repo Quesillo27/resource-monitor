@@ -2137,8 +2137,10 @@ function ManagerUpdateButton({ api }) {
     }
   }
 
-  // Caso 1: update activo o recién terminado → mostrar siempre con su estado.
-  if (isActive || status.state === 'failed' || status.state === 'done') {
+  // Caso 1: update activo (pulling/building/restarting) o reciente fallido →
+  // mostrar siempre con su estado. 'done' NO entra acá: cae al caso 3
+  // (mostrar versión) porque ya quedó al día.
+  if (isActive || status.state === 'failed') {
     return (
       <button
         className="logout manager-update"
