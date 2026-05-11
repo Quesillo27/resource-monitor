@@ -255,8 +255,9 @@ func parsePingAvg(output string) *float64 {
 			return &v
 		}
 	}
-	// Windows: "Average = 5ms"
-	reWin := regexp.MustCompile(`Average\s*=\s*([\d]+)\s*ms`)
+	// Windows: la etiqueta del promedio depende del idioma del SO
+	// (en-US: Average, es: Media, pt: Média, fr: Moyenne, de: Mittelwert, it: Media)
+	reWin := regexp.MustCompile(`(?:Average|Media|Média|Moyenne|Mittelwert)\s*=\s*([\d]+)\s*ms`)
 	if m := reWin.FindStringSubmatch(output); len(m) >= 2 {
 		v, err := strconv.ParseFloat(m[1], 64)
 		if err == nil {
