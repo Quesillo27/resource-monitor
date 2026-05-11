@@ -107,6 +107,13 @@ fi
 
 install -m 0755 "$TMP_BIN" "$INSTALL_PATH"
 
+# SELinux (Rocky, RHEL, CentOS, AlmaLinux, Fedora): restaurar contexto bin_t
+# para que systemd pueda ejecutar el binario (status=203/EXEC si falta).
+# En sistemas sin SELinux el comando no existe → best-effort, no es error.
+if command -v restorecon >/dev/null 2>&1; then
+  restorecon -F "$INSTALL_PATH" 2>/dev/null || true
+fi
+
 ARGS=(install --server-url "$SERVER_URL" --interval "$INTERVAL" --profile "$PROFILE")
 if [[ -n "$ENROLLMENT_TOKEN" ]]; then
   ARGS+=(--enrollment-token "$ENROLLMENT_TOKEN")

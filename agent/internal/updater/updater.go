@@ -206,7 +206,20 @@ func applyUpdate(tempBin, target string) error {
 	if runtime.GOOS == "windows" {
 		return spawnWindowsHelper(tempBin, target)
 	}
-	return os.Rename(tempBin, target)
+	if err := os.Rename(tempBin, target); err != nil {
+		return err
+	}
+	// En sistemas con SELinux (Rocky, RHEL, CentOS, AlmaLinux, Fedora) el
+	// rename rompe el contexto del archivo (bin_t -> default_t) y systemd
+	// no puede ejecutarlo (status=203/EXEC: Permission denied). restorecon
+	// lo restaura desde la policy. Si no está disponible (Debian/Ubuntu sin
+	// SELinux), no es error: best-effort.
+	if runtime.GOOS == "linux" {
+		if path, err := exec.LookPath("restorecon"); err == nil {
+			_ = exec.Command(path, "-F", target).Run()
+		}
+	}
+	return nil
 }
 
 // spawnWindowsHelper genera un script .cmd que se ejecuta desconectado: tras
