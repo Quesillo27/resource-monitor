@@ -118,32 +118,35 @@ run_update() {
   fi
 
   write_status "restarting" "$FROM" "$TO" "" "$STARTED"
-  # 'up -d' aplica las imágenes nuevas. Pasamos MANAGER_BUILD_SHA al backend
-  # para que pueda reportar el sha real que está corriendo (vs. el HEAD del
-  # repo del updater, que pueden divergir momentáneamente).
-  if ! MANAGER_BUILD_SHA="$TO" dc up -d backend frontend 2>&1; then
+  # 'up -d --force-recreate' garantiza que backend y frontend arranquen con
+  # imagenes nuevas Y con configs/mounts frescos (importante si el compose
+  # cambio entre versiones, o si los containers viejos quedaron con bind
+  # mounts cruzados). MANAGER_BUILD_SHA expone al backend el sha real que
+  # esta corriendo (vs. el HEAD del repo del updater, que pueden divergir
+  # momentaneamente).
+  if ! MANAGER_BUILD_SHA="$TO" dc up -d --force-recreate backend frontend 2>&1; then
     write_status "failed" "$FROM" "$TO" "compose up falló" "$STARTED"
     echo "[updater] FAIL compose up" >&2
     return 1
   fi
 
+  # Siempre recrear agent-assets — recompila los 4 binarios (linux, windows,
+  # darwin x2) con el SHA/tag mas reciente y los publica atomico en /downloads.
+  # Se hace SIEMPRE (no solo si "agent/" cambio) porque:
+  #  - Garantiza que la version "Latest" reportada quede sincronizada con el
+  #    HEAD del repo aun en cambios menores que no tocan agent/ (ej: doc, infra).
+  #  - Cura ambientes cuyo container venia con mounts obsoletos sin que el
+  #    operador tenga que diagnosticarlo.
+  # Es barato: el watcher interno se hubiera disparado igual al detectar el
+  # SHA nuevo. El force-recreate solo asegura el arranque limpio.
+  echo "[updater] recreando agent-assets para recompilar binarios del agente..."
+  dc up -d --force-recreate agent-assets 2>&1 || \
+    echo "[updater] WARN: no pude recrear agent-assets, su watcher interno intentara compilar" >&2
+
   write_status "done" "$FROM" "$TO" "" "$STARTED"
   echo "[updater] DONE $FROM -> $TO"
 
   CHANGED_FILES="$(cd "$REPO" && git diff --name-only "$FROM" "$TO" 2>/dev/null || echo)"
-
-  # Si tocaron cualquier archivo del agente o los scripts de instalacion, forzar
-  # recreate de agent-assets para que recompile los binarios y los publique en
-  # /downloads. Su watcher interno suele detectar el cambio de SHA, pero un
-  # --force-recreate garantiza que el container arranque con mounts y working
-  # dir actualizados (evita que un bind mount obsoleto deje binarios viejos
-  # publicados indefinidamente, como pasaria en un host donde el repo se movio
-  # de path).
-  if echo "$CHANGED_FILES" | grep -qE "^(agent/|scripts/install-agent\.)"; then
-    echo "[updater] cambios en agent/, recreando agent-assets..."
-    dc up -d --force-recreate agent-assets 2>&1 || \
-      echo "[updater] WARN: no pude recrear agent-assets, su watcher interno intentara compilar" >&2
-  fi
 
   # Si el propio script cambio en este pull, recrear el container manager-updater
   # para que cargue la version nueva. El docker compose mata este container y
