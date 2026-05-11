@@ -609,13 +609,6 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentVersion != "" {
 		_ = s.store.UpdateAgentVersion(r.Context(), agentID, req.AgentVersion)
-
-		// Auto-update: si la versión del agente difiere de la latest publicada,
-		// encolar comando "update". EnqueueAgentCommand es idempotente (no duplica
-		// si ya hay uno pending o delivered).
-		if latest := s.currentLatestVersion(); latest != "" && req.AgentVersion != latest {
-			_, _ = s.store.EnqueueAgentCommand(r.Context(), agentID, "update", nil)
-		}
 	}
 	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
 	writeJSON(w, http.StatusOK, map[string]any{

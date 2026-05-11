@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Actualiza AGENT_RELEASE_VERSION en .env y rebuild de agent-assets + backend.
+# Actualiza AGENT_RELEASE_VERSION (prefix SemVer) en .env y rebuild de
+# agent-assets + backend. agent-assets concatena "<prefix>-<git-sha>" al
+# compilar y publica el binario en /downloads/<prefix>-<sha>.
+#
 # Uso:
-#   ./scripts/set-version.sh                    # auto: v1.0.0-<git-short-sha>
-#   ./scripts/set-version.sh v1.3.0             # versión explícita
-#   ./scripts/set-version.sh v1.3.0 --no-build  # solo actualiza .env
+#   ./scripts/set-version.sh v1.3.0             # bump explícito (recomendado)
+#   ./scripts/set-version.sh v1.3.0 --no-build  # solo actualiza .env, no recompila
+#   ./scripts/set-version.sh                    # error: requiere argumento explícito
 
 set -euo pipefail
 
@@ -32,11 +35,15 @@ SKIP_BUILD=0
 [[ "${2:-}" == "--no-build" ]] && SKIP_BUILD=1
 
 if [[ -z "$VERSION" ]]; then
-  if git rev-parse --short HEAD >/dev/null 2>&1; then
-    VERSION="v1.0.0-$(git rev-parse --short HEAD)"
-  else
-    VERSION="v1.0.0-$(date +%Y%m%d-%H%M%S)"
-  fi
+  echo "ERROR: pasá la versión explícita como argumento (ej: v1.3.0)." >&2
+  echo "       El sha de git lo concatena agent-assets automáticamente." >&2
+  exit 1
+fi
+
+# Validar formato vX.Y.Z (sin sha, agent-assets se encarga).
+if ! [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+  echo "ERROR: formato inválido '$VERSION'. Esperado: vX.Y.Z (ej: v1.3.0)." >&2
+  exit 1
 fi
 
 if grep -q '^AGENT_RELEASE_VERSION=' "$ENV_FILE"; then
