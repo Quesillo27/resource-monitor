@@ -53,10 +53,24 @@ VITE_API_BASE_URL=
 ALLOWED_ORIGINS=
 AGENT_RELEASE_VERSION=v1.4.0
 MANAGER_VERSION=v1.5.0
+# RM_REPO_DIR: path ABSOLUTO del host donde vive el repo. Los bind mounts
+# del compose lo usan en lugar de paths relativos para que docker compose
+# ejecutado desde otro cwd (ej: desde el container manager-updater) genere
+# bind mounts validos. NO lo edites a mano — install.sh lo regenera siempre
+# que se ejecute, asi un git clone a otro path se autoarregla.
+RM_REPO_DIR=$(pwd)
 EOF
   ok ".env creado."
 else
-  info ".env ya existe — reutilizando configuración."
+  info ".env ya existe — refrescando RM_REPO_DIR..."
+  CURRENT_DIR=$(pwd)
+  if grep -q '^RM_REPO_DIR=' .env; then
+    # macOS sed quiere -i ''  pero linux -i sin arg; usamos perl para portabilidad
+    perl -i -pe "s|^RM_REPO_DIR=.*|RM_REPO_DIR=${CURRENT_DIR}|" .env
+  else
+    printf '\nRM_REPO_DIR=%s\n' "$CURRENT_DIR" >> .env
+  fi
+  ok ".env actualizado (RM_REPO_DIR=${CURRENT_DIR})."
 fi
 
 info "Construyendo y levantando contenedores (1-3 min la primera vez)..."

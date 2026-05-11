@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+      - ${RM_REPO_DIR:-.}/backend/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-resource_monitor} -d ${POSTGRES_DB:-resource_monitor}"]
       interval: 10s
@@ -43,7 +43,7 @@ services:
     image: docker:28-cli
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - .:/repo
+      - ${RM_REPO_DIR:-.}:/repo
       - manager-triggers:/triggers
     environment:
       COMPOSE_FILE: docker-compose.prod.yml
@@ -56,9 +56,9 @@ services:
     image: golang:1.24-alpine
     working_dir: /work/agent
     volumes:
-      - ./agent:/src/agent:ro
-      - ./scripts:/src/scripts:ro
-      - ./.git:/src/.git:ro
+      - ${RM_REPO_DIR:-.}/agent:/src/agent:ro
+      - ${RM_REPO_DIR:-.}/scripts:/src/scripts:ro
+      - ${RM_REPO_DIR:-.}/.git:/src/.git:ro
       - agent-downloads:/downloads
     restart: unless-stopped
     healthcheck:
