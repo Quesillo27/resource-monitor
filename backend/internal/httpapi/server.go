@@ -108,6 +108,13 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin")).Patch("/users/{id}", s.updateUser)
 			r.With(s.requireRole("admin")).Post("/users/{id}/password", s.updateUserPassword)
 			r.With(s.requireRole("admin")).Delete("/users/{id}", s.deleteUser)
+
+			// Self-update del manager: cualquier usuario admin puede consultar el
+			// estado, pero solo admin puede disparar el update. El handler escribe
+			// un archivo trigger en un volumen compartido con el container
+			// manager-updater (que ejecuta git pull + docker compose build/up).
+			r.With(s.requireRole("admin")).Get("/manager/update/status", s.managerUpdateStatus)
+			r.With(s.requireRole("admin")).Post("/manager/update", s.managerUpdateTrigger)
 		})
 
 		r.Post("/agent/register", s.registerAgent)
@@ -716,6 +723,46 @@ func (s *Server) agentVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{
 		"version": s.currentLatestVersion(),
 	})
+}
+
+// Volumen compartido con el container manager-updater. El backend escribe el
+// trigger y lee el status; el updater procesa el trigger fuera del proceso.
+const (
+	managerTriggerPath = "/triggers/update.requested"
+	managerStatusPath  = "/triggers/status.json"
+)
+
+func (s *Server) managerUpdateStatus(w http.ResponseWriter, r *http.Request) {
+	data, err := os.ReadFile(managerStatusPath)
+	if err != nil {
+		// Si no existe aún, devolver estado idle por defecto en vez de 500.
+		writeJSON(w, http.StatusOK, map[string]any{"state": "idle"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func (s *Server) managerUpdateTrigger(w http.ResponseWriter, r *http.Request) {
+	// Si ya hay un update activo, no duplicar.
+	if data, err := os.ReadFile(managerStatusPath); err == nil {
+		var st struct {
+			State string `json:"state"`
+		}
+		if json.Unmarshal(data, &st) == nil {
+			switch st.State {
+			case "pulling", "building_backend", "building_frontend", "restarting":
+				writeError(w, http.StatusConflict, "update already in progress")
+				return
+			}
+		}
+	}
+	if err := os.WriteFile(managerTriggerPath, []byte("requested"), 0o644); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to write trigger: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {

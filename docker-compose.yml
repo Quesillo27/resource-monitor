@@ -28,9 +28,22 @@ services:
       - "8080:8080"
     volumes:
       - agent-downloads:/downloads:ro
+      - manager-triggers:/triggers
     depends_on:
       postgres:
         condition: service_healthy
+
+  manager-updater:
+    image: docker:28-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/repo
+      - manager-triggers:/triggers
+    environment:
+      COMPOSE_FILE: docker-compose.yml
+    working_dir: /repo
+    restart: unless-stopped
+    command: ["sh", "/repo/scripts/manager-updater.sh"]
 
   agent-assets:
     image: golang:1.24-alpine
@@ -97,3 +110,4 @@ services:
 volumes:
   postgres-data:
   agent-downloads:
+  manager-triggers:

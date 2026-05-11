@@ -8,6 +8,25 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y e
 - **MINOR** — features, mejoras de performance o cambios de comportamiento backward-compatible.
 - **PATCH** — bugfixes sin cambios de comportamiento.
 
+## [1.4.0] — 2026-05-11
+
+### Agregado
+
+- **Self-update del manager desde la UI**. Botón "Actualizar manager" en el sidebar (debajo de los items de navegación, sobre Salir). Click → confirmación → git pull + rebuild de backend+frontend + restart, todo desde la UI sin necesidad de SSH.
+- **Servicio nuevo `manager-updater`** en docker-compose: container dedicado (`docker:28-cli` + git) que vigila `/triggers/update.requested` y ejecuta el flujo. Sobrevive a la muerte del backend durante el rebuild porque corre aislado.
+- **Endpoints admin**:
+  - `POST /api/manager/update` — escribe el archivo trigger (idempotente: 409 si ya hay update activo).
+  - `GET /api/manager/update/status` — lee `status.json` con estado, sha origen/destino, error si falló.
+- **Estados visibles** en el botón: `idle` → `pulling` → `building_backend` → `building_frontend` → `restarting` → `done`/`failed: <razón>`. Polling 2s mientras hay update activo, 15s en idle.
+- **Volumen `manager-triggers`** compartido entre backend y manager-updater para pasarse el trigger y el status.
+
+### Detalles técnicos
+
+- El flujo no hace rollback automático si falla. Si `docker compose build` falla, no se hace `up`: el backend sigue corriendo la versión previa con error reportado en `status.json`.
+- El botón está deshabilitado mientras hay un update activo (evita doble click + race del lockfile en el script).
+- El container `manager-updater` monta `/var/run/docker.sock` (riesgo de privilegio: tiene control completo del Docker daemon del host). Aceptable en un VPS personal con un solo admin; documentar antes de exponer la app multi-tenant.
+- La actualización **no** regenera binarios de agentes (eso lo hace `agent-assets` cuando detecta cambio de SHA). Si querés que los agentes vean la versión nueva, después del self-update tenés que clickear "↑ actualizar" en cada agente.
+
 ## [1.3.0] — 2026-05-11
 
 ### Cambios de comportamiento
@@ -43,5 +62,6 @@ Sesión idle del detalle de agente: **~700 KB/min → <30 KB/min** (96% menos tr
 - Badge `✗ falló` se oculta cuando el agente ya está en la versión latest.
 - Escape de `$AGENT_VERSION` en docker-compose para que lo interprete el container, no compose.
 
+[1.4.0]: https://github.com/Quesillo27/resource-monitor/releases/tag/v1.4.0
 [1.3.0]: https://github.com/Quesillo27/resource-monitor/releases/tag/v1.3.0
 [1.2.0]: https://github.com/Quesillo27/resource-monitor/releases/tag/v1.2.0

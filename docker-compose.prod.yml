@@ -31,12 +31,25 @@ services:
       AGENT_RELEASE_VERSION: ${AGENT_RELEASE_VERSION:-v1.0.0}
     volumes:
       - agent-downloads:/downloads:ro
+      - manager-triggers:/triggers
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
       - internal
+
+  manager-updater:
+    image: docker:28-cli
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/repo
+      - manager-triggers:/triggers
+    environment:
+      COMPOSE_FILE: docker-compose.prod.yml
+    working_dir: /repo
+    restart: unless-stopped
+    command: ["sh", "/repo/scripts/manager-updater.sh"]
 
   agent-assets:
     image: golang:1.24-alpine
@@ -110,6 +123,7 @@ services:
 volumes:
   postgres-data:
   agent-downloads:
+  manager-triggers:
 
 networks:
   internal:

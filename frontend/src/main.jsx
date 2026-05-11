@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Copy,
   Cpu,
+  Download,
   Edit3,
   Eye,
   Gauge,
@@ -85,6 +86,7 @@ function Shell({ token, view, setView, onLogout }) {
             </button>
           ))}
         </nav>
+        <ManagerUpdateButton api={api} />
         <button className="logout" onClick={onLogout}><LogOut size={18} />Salir</button>
       </aside>
       <main>
@@ -2086,6 +2088,63 @@ function useLoad(loader, deps, refreshMs = 0) {
     return () => { alive = false; if (timer) clearInterval(timer); };
   }, [...deps, version]);
   return { data, loading, lastUpdated, reload: () => setVersion((v) => v + 1) };
+}
+
+function ManagerUpdateButton({ api }) {
+  const [status, setStatus] = useState({ state: 'idle' });
+  const [busy, setBusy] = useState(false);
+
+  // Polling: rápido si hay update activo, lento si está idle/done/failed.
+  useEffect(() => {
+    let alive = true;
+    const tick = () => api.get('/api/manager/update/status')
+      .then((s) => alive && setStatus(s || { state: 'idle' }))
+      .catch(() => {});
+    tick();
+    const active = ['pulling', 'building_backend', 'building_frontend', 'restarting'].includes(status.state);
+    const period = active ? 2000 : 15_000;
+    const timer = setInterval(tick, period);
+    return () => { alive = false; clearInterval(timer); };
+  }, [status.state]);
+
+  const labels = {
+    idle: 'Actualizar manager',
+    pulling: 'Descargando código…',
+    building_backend: 'Compilando backend…',
+    building_frontend: 'Compilando frontend…',
+    restarting: 'Reiniciando…',
+    done: '✓ Actualizado',
+    failed: '✗ Falló',
+  };
+  const isActive = ['pulling', 'building_backend', 'building_frontend', 'restarting'].includes(status.state);
+  const label = labels[status.state] || status.state;
+
+  async function trigger() {
+    if (isActive) return;
+    const msg = `Actualizar el manager?\n\nEsto hará: git pull → rebuild backend+frontend → reinicio.\nEl manager va a estar inaccesible ~30s mientras reinicia.`;
+    if (!window.confirm(msg)) return;
+    setBusy(true);
+    try {
+      await api.post('/api/manager/update', {});
+      setStatus({ state: 'pulling' });
+    } catch (err) {
+      window.alert(`Error: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      className="logout manager-update"
+      onClick={trigger}
+      disabled={isActive || busy}
+      title={status.state === 'failed' && status.error ? `Último intento: ${status.error}` : (status.to ? `${status.from || '?'} → ${status.to}` : 'Self-update del manager')}
+    >
+      <Download size={18} />
+      {label}
+    </button>
+  );
 }
 
 function createApi(token, onUnauthorized) {
