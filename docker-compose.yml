@@ -68,7 +68,8 @@ services:
       while true; do
         CURRENT_SHA=$$(cd /src && git log -1 --format=%h -- agent/ scripts/install-agent.sh scripts/install-agent.ps1 2>/dev/null || echo unknown);
         if [ \"$$CURRENT_SHA\" != \"$$LAST_SHA\" ]; then
-          VERSION=\"${AGENT_RELEASE_VERSION:-v1.0.0}-$$CURRENT_SHA\";
+          TAG=$$(cd /src && git describe --tags --abbrev=0 --match 'v*' --exclude 'manager-v*' 2>/dev/null || echo v0.0.0);
+          VERSION=\"$$TAG-$$CURRENT_SHA\";
           echo \"[agent-assets] $$LAST_SHA -> $$CURRENT_SHA (compilando $$VERSION; ultimo cambio agente)\";
           rm -rf /work/agent && mkdir -p /work/agent && cp -R /src/agent/. /work/agent/ &&
           cd /work/agent && go mod tidy &&

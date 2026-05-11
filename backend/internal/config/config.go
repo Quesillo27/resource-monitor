@@ -16,8 +16,6 @@ type Config struct {
 	RetentionDays        int
 	OfflineAfterSeconds  int
 	AllowedOrigins       []string
-	AgentReleaseVersion  string
-	ManagerVersion       string
 	ManagerBuildSHA      string
 }
 
@@ -52,8 +50,6 @@ func Load() Config {
 		RetentionDays:       envInt("RETENTION_DAYS", 30),
 		OfflineAfterSeconds: envInt("OFFLINE_AFTER_SECONDS", 180),
 		AllowedOrigins:      filtered,
-		AgentReleaseVersion: env("AGENT_RELEASE_VERSION", "dev"),
-		ManagerVersion:      env("MANAGER_VERSION", "dev"),
 		ManagerBuildSHA:     env("MANAGER_BUILD_SHA", ""),
 	}
 }

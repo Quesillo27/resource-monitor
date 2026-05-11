@@ -115,16 +115,18 @@ run_update() {
 
 # Hace 'git fetch' (no muta el working tree) y compara HEAD local vs remoto,
 # escribe version-info.json para que la UI sepa si hay update disponible.
+# Incluye "version" semántica del manager derivada de git tags (manager-v*).
 update_version_info() {
   cd "$REPO" || return 0
   git fetch --quiet origin 2>/dev/null || true
   CURRENT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
   LATEST="$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo unknown)"
   BEHIND="$(git rev-list --count HEAD..origin/main 2>/dev/null || git rev-list --count HEAD..origin/master 2>/dev/null || echo 0)"
+  VERSION="$(git describe --tags --abbrev=0 --match 'manager-v*' 2>/dev/null | sed 's/^manager-//' || echo v0.0.0)"
   AVAILABLE="false"
   [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ] && AVAILABLE="true"
   cat > "$VERSION_INFO.tmp" <<EOF
-{"current":"$CURRENT","latest":"$LATEST","behind":$BEHIND,"update_available":$AVAILABLE,"checked_at":"$(now)"}
+{"version":"$VERSION","current":"$CURRENT","latest":"$LATEST","behind":$BEHIND,"update_available":$AVAILABLE,"checked_at":"$(now)"}
 EOF
   mv -f "$VERSION_INFO.tmp" "$VERSION_INFO"
   chmod 666 "$VERSION_INFO" 2>/dev/null || true

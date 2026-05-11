@@ -23,15 +23,16 @@ import (
 const versionFilePath = "/downloads/version.txt"
 
 // currentLatestVersion devuelve la versión actualmente publicada en /downloads/.
-// Prefiere el archivo (lo escribe agent-assets en cada build), y si no existe
-// cae al valor del entorno AGENT_RELEASE_VERSION (compatibilidad).
+// Lo escribe agent-assets en cada build (formato vX.Y.Z-<sha> derivado de git
+// describe). Si no existe el archivo (arranque inicial antes del primer build),
+// devuelve "unknown".
 func (s *Server) currentLatestVersion() string {
 	if data, err := os.ReadFile(versionFilePath); err == nil {
 		if v := strings.TrimSpace(string(data)); v != "" {
 			return v
 		}
 	}
-	return s.cfg.AgentReleaseVersion
+	return "unknown"
 }
 
 type Server struct {
@@ -743,8 +744,11 @@ func (s *Server) managerVersion(w http.ResponseWriter, r *http.Request) {
 	if current == "" {
 		current = "unknown"
 	}
+	// "version" (vX.Y.Z-<sha>) lo escribe manager-updater en version-info.json
+	// derivado de git describe --tags. Si el archivo no existe todavía (primer
+	// arranque), reporta "unknown".
 	out := map[string]any{
-		"version":          s.cfg.ManagerVersion,
+		"version":          "unknown",
 		"current":          current,
 		"latest":           "unknown",
 		"update_available": false,
@@ -752,6 +756,9 @@ func (s *Server) managerVersion(w http.ResponseWriter, r *http.Request) {
 	if data, err := os.ReadFile(managerVersionInfoPath); err == nil {
 		var info map[string]any
 		if json.Unmarshal(data, &info) == nil {
+			if v, ok := info["version"].(string); ok && v != "" {
+				out["version"] = v
+			}
 			if v, ok := info["latest"].(string); ok {
 				out["latest"] = v
 			}
