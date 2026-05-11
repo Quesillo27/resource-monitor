@@ -69,6 +69,7 @@ func (s *Store) ensureRuntimeSchema(ctx context.Context) error {
 		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_bytes BIGINT NOT NULL DEFAULT 0",
 		"ALTER TABLE metric_samples ADD COLUMN IF NOT EXISTS swap_used_percent DOUBLE PRECISION NOT NULL DEFAULT 0",
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_version TEXT DEFAULT ''",
+		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS primary_ip TEXT NOT NULL DEFAULT ''",
 		`CREATE TABLE IF NOT EXISTS agent_commands (
 			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -191,17 +192,19 @@ func (s *Store) RegisterAgent(ctx context.Context, req models.AgentRegisterReque
 	if existErr == nil {
 		// Agent exists — rotate credential only, preserve history
 		if _, err = tx.Exec(ctx, `
-			UPDATE agents SET credential_hash=$1, os=$2, arch=$3, status='online', last_seen_at=now(), updated_at=now()
+			UPDATE agents SET credential_hash=$1, os=$2, arch=$3,
+			    primary_ip=COALESCE(NULLIF($5, ''), primary_ip),
+			    status='online', last_seen_at=now(), updated_at=now()
 			WHERE id=$4
-		`, hashSecret(credential), req.OS, req.Arch, agentID); err != nil {
+		`, hashSecret(credential), req.OS, req.Arch, agentID, req.PrimaryIP); err != nil {
 			return nil, err
 		}
 	} else {
 		err = tx.QueryRow(ctx, `
-			INSERT INTO agents (name, hostname, os, arch, uptime_seconds, credential_hash, status, last_seen_at)
-			VALUES ($1, $2, $3, $4, $5, $6, 'online', now())
+			INSERT INTO agents (name, hostname, os, arch, uptime_seconds, credential_hash, status, last_seen_at, primary_ip)
+			VALUES ($1, $2, $3, $4, $5, $6, 'online', now(), COALESCE($7, ''))
 			RETURNING id::text
-		`, name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), hashSecret(credential)).Scan(&agentID)
+		`, name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), hashSecret(credential), req.PrimaryIP).Scan(&agentID)
 		if err != nil {
 			return nil, err
 		}
@@ -233,10 +236,11 @@ func (s *Store) Heartbeat(ctx context.Context, agentID string, req models.Heartb
 		    os = COALESCE(NULLIF($4, ''), os),
 		    arch = COALESCE(NULLIF($5, ''), arch),
 		    uptime_seconds = $6,
+		    primary_ip = COALESCE(NULLIF($7, ''), primary_ip),
 		    last_seen_at = now(),
 		    updated_at = now()
 		WHERE id = $1
-	`, agentID, req.Name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds))
+	`, agentID, req.Name, req.Hostname, req.OS, req.Arch, int64(req.UptimeSeconds), req.PrimaryIP)
 	return err
 }
 
@@ -429,6 +433,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		       a.last_seen_at, a.created_at, l.cpu_percent, l.memory_used_percent, l.captured_at,
 		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}'),
 		       COALESCE(a.agent_version, ''),
+		       COALESCE(a.primary_ip, ''),
 		       lc.id, lc.command, lc.status, lc.created_at, lc.completed_at, lc.error
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
@@ -450,7 +455,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		var uptime int64
 		var cmdID, cmdCommand, cmdStatus, cmdError *string
 		var cmdCreated, cmdCompleted *time.Time
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion,
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion, &agent.PrimaryIP,
 			&cmdID, &cmdCommand, &cmdStatus, &cmdCreated, &cmdCompleted, &cmdError); err != nil {
 			return nil, err
 		}

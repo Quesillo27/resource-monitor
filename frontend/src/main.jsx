@@ -608,7 +608,7 @@ function AgentDetail({ api, agentId, onBack }) {
       <Header title={agent?.name || 'Equipo'} meta={<div className="actions"><button onClick={onBack} disabled={deleting}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" disabled={deleting} /><IconButton icon={Trash2} onClick={deleteAgent} label={deleting ? 'Eliminando…' : 'Eliminar'} disabled={deleting} /><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} /></div>} />
       {agent && (
         <>
-          <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span></div>
+          <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span>{agent.primary_ip && <span>{agent.primary_ip}</span>}</div>
           <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
           <div className="tab-row">
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
@@ -641,25 +641,25 @@ const OS_LABEL = { linux: 'Linux', windows: 'Windows', darwin: 'macOS' };
 function agentCommands(os) {
   if (os === 'windows') {
     return [
-      'Get-Service resource-monitor-agent',
-      'Get-EventLog -LogName Application -Source resource-monitor-agent -Newest 50',
-      '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" status --config "C:\\ProgramData\\resource-monitor-agent\\config.json"',
-      '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" doctor --config "C:\\ProgramData\\resource-monitor-agent\\config.json"',
+      { cmd: 'Get-Service resource-monitor-agent', desc: 'Estado del servicio (Running / Stopped) y modo de arranque.' },
+      { cmd: 'Get-EventLog -LogName Application -Source resource-monitor-agent -Newest 50', desc: 'Últimos 50 eventos del agente en el Event Viewer (errores, panics, restarts).' },
+      { cmd: '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" status --config "C:\\ProgramData\\resource-monitor-agent\\config.json"', desc: 'Reporte del agente: versión, URL del manager, último heartbeat OK/fallo.' },
+      { cmd: '& "C:\\Program Files\\resource-monitor-agent\\resource-monitor-agent.exe" doctor --config "C:\\ProgramData\\resource-monitor-agent\\config.json"', desc: 'Diagnóstico full: conectividad, permisos, validación de config y prueba de envío.' },
     ];
   }
   if (os === 'darwin') {
     return [
-      'sudo launchctl print system/com.resourcemonitor.agent',
-      "log show --predicate 'process == \"resource-monitor-agent\"' --info --last 10m",
-      'sudo /usr/local/bin/resource-monitor-agent status --config /usr/local/etc/resource-monitor-agent/config.json',
-      'sudo /usr/local/bin/resource-monitor-agent doctor --config /usr/local/etc/resource-monitor-agent/config.json',
+      { cmd: 'sudo launchctl print system/com.resourcemonitor.agent', desc: 'Estado del daemon launchd: corriendo, PID, exit codes, último restart.' },
+      { cmd: "log show --predicate 'process == \"resource-monitor-agent\"' --info --last 10m", desc: 'Logs del unified log de los últimos 10 minutos filtrados por el proceso.' },
+      { cmd: 'sudo /usr/local/bin/resource-monitor-agent status --config /usr/local/etc/resource-monitor-agent/config.json', desc: 'Reporte del agente: versión, URL del manager, último heartbeat OK/fallo.' },
+      { cmd: 'sudo /usr/local/bin/resource-monitor-agent doctor --config /usr/local/etc/resource-monitor-agent/config.json', desc: 'Diagnóstico full: conectividad, permisos, validación de config y prueba de envío.' },
     ];
   }
   return [
-    'sudo systemctl status resource-monitor-agent',
-    'sudo journalctl -u resource-monitor-agent -f --since "10 min ago"',
-    'sudo /usr/local/bin/resource-monitor-agent status --config /etc/resource-monitor-agent/config.json',
-    'sudo /usr/local/bin/resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json',
+    { cmd: 'sudo systemctl status resource-monitor-agent', desc: 'Estado del servicio (activo, desde cuándo, PID y últimas líneas de log).' },
+    { cmd: 'sudo journalctl -u resource-monitor-agent -f --since "10 min ago"', desc: 'Logs en vivo de los últimos 10 minutos (Ctrl+C para salir).' },
+    { cmd: 'sudo /usr/local/bin/resource-monitor-agent status --config /etc/resource-monitor-agent/config.json', desc: 'Reporte del agente: versión, URL del manager, último heartbeat OK/fallo.' },
+    { cmd: 'sudo /usr/local/bin/resource-monitor-agent doctor --config /etc/resource-monitor-agent/config.json', desc: 'Diagnóstico full: conectividad, permisos, validación de config y prueba de envío.' },
   ];
 }
 
@@ -689,7 +689,7 @@ function copyTextFallback(text) {
   }
 }
 
-function CommandLine({ cmd }) {
+function CommandLine({ cmd, desc }) {
   const [state, setState] = useState('idle'); // 'idle' | 'ok' | 'err'
   async function doCopy() {
     let ok = false;
@@ -709,11 +709,14 @@ function CommandLine({ cmd }) {
   const cls = state === 'ok' ? 'cmd-copy ok' : state === 'err' ? 'cmd-copy err' : 'cmd-copy';
   const title = state === 'ok' ? 'Copiado' : state === 'err' ? 'No se pudo copiar (selecciona y Ctrl+C)' : 'Copiar al portapapeles';
   return (
-    <div className="cmd-row">
-      <code>{cmd}</code>
-      <button type="button" className={cls} onClick={doCopy} title={title} aria-label={title}>
-        {state === 'ok' ? <CheckCircle2 size={14} /> : <Copy size={14} />}
-      </button>
+    <div className="cmd-item">
+      {desc && <p className="cmd-desc">{desc}</p>}
+      <div className="cmd-row">
+        <code>{cmd}</code>
+        <button type="button" className={cls} onClick={doCopy} title={title} aria-label={title}>
+          {state === 'ok' ? <CheckCircle2 size={14} /> : <Copy size={14} />}
+        </button>
+      </div>
     </div>
   );
 }
@@ -746,6 +749,7 @@ function SummaryTab({ agent, status, disks, networks, services, alerts, history 
     <>
       <div className="summary-meta">
         <Status status={agent.status} />
+        {agent.primary_ip && <span><strong>IP</strong> {agent.primary_ip}</span>}
         {agent.agent_version && <span><strong>Versión</strong> {agent.agent_version}</span>}
         {agent.uptime_seconds ? <span><strong>Uptime</strong> {duration(agent.uptime_seconds)}</span> : null}
         {lastSeen && <span><strong>Último contacto</strong> {relativeTime(new Date(lastSeen))}</span>}
@@ -771,7 +775,7 @@ function SummaryTab({ agent, status, disks, networks, services, alerts, history 
 
       <Panel title="Diagnóstico del agente" action={<span className="os-chip">{OS_LABEL[os]}</span>}>
         <div className="cmd-list">
-          {commands.map((cmd) => <CommandLine key={cmd} cmd={cmd} />)}
+          {commands.map(({ cmd, desc }) => <CommandLine key={cmd} cmd={cmd} desc={desc} />)}
         </div>
       </Panel>
     </>

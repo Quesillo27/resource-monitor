@@ -107,6 +107,7 @@ type AgentRegisterRequest struct {
 	OS              string `json:"os"`
 	Arch            string `json:"arch"`
 	UptimeSeconds   uint64 `json:"uptime_seconds"`
+	PrimaryIP       string `json:"primary_ip,omitempty"`
 }
 
 type AgentAuthResponse struct {
@@ -122,6 +123,7 @@ type HeartbeatRequest struct {
 	UptimeSeconds  uint64 `json:"uptime_seconds"`
 	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
 	AgentVersion   string `json:"agent_version,omitempty"`
+	PrimaryIP      string `json:"primary_ip,omitempty"`
 }
 
 type MetricsRequest struct {
@@ -197,6 +199,7 @@ type Agent struct {
 	DiskCount     int        `json:"disk_count"`
 	Tags          []string      `json:"tags"`
 	AgentVersion  string        `json:"agent_version,omitempty"`
+	PrimaryIP     string        `json:"primary_ip,omitempty"`
 	LastCommand   *AgentCommandSummary `json:"last_command,omitempty"`
 }
 

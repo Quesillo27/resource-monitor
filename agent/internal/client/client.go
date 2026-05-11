@@ -57,6 +57,7 @@ func (c *Client) Register(ctx context.Context, token string, host collector.Host
 		"os":               host.OS,
 		"arch":             host.Arch,
 		"uptime_seconds":   host.UptimeSeconds,
+		"primary_ip":       host.PrimaryIP,
 	}
 	var result RegisterResponse
 	err := c.post(ctx, "/api/agent/register", payload, false, &result)

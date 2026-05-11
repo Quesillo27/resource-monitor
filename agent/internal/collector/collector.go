@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"net"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -33,6 +34,7 @@ type Host struct {
 	UptimeSeconds  uint64 `json:"uptime_seconds"`
 	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
 	AgentVersion   string `json:"agent_version,omitempty"`
+	PrimaryIP      string `json:"primary_ip,omitempty"`
 }
 
 type Metrics struct {
@@ -114,7 +116,30 @@ func HostInfo() (Host, error) {
 		Arch:           runtime.GOARCH,
 		UptimeSeconds:  info.Uptime,
 		AgentUptimeSec: uint64(time.Since(agentStartedAt).Seconds()),
+		PrimaryIP:      detectPrimaryIPv4(),
 	}, nil
+}
+
+// detectPrimaryIPv4 retorna la IPv4 de la interfaz que el SO usaría para salir
+// al exterior. El truco: abrimos una "conexión" UDP a 8.8.8.8:80 — el kernel
+// elige la interfaz de salida pero no envía ningún paquete porque UDP es
+// connectionless. Funciona offline (sin gateway, sin DNS) porque solo se
+// consulta la tabla de ruteo. Si todo falla devuelve "" para que el backend
+// sepa que no hay IP detectada.
+func detectPrimaryIPv4() string {
+	conn, err := net.Dial("udp4", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	addr, ok := conn.LocalAddr().(*net.UDPAddr)
+	if !ok || addr.IP == nil {
+		return ""
+	}
+	if v4 := addr.IP.To4(); v4 != nil {
+		return v4.String()
+	}
+	return ""
 }
 
 // Collect recolecta todas las métricas del sistema. Tiene un timeout interno
