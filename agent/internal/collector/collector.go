@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -414,6 +415,7 @@ var (
 func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 	procs, err := process.ProcessesWithContext(ctx)
 	if err != nil {
+		log.Printf("collector: process.Processes falló (%s): %v — se omite muestra de procesos este ciclo", runtime.GOOS, err)
 		return nil
 	}
 
@@ -423,6 +425,10 @@ func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 	live := map[int32]bool{}
 	result := []ProcMetric{}
 	numCPU := float64(runtime.NumCPU())
+	// Timeout corto por proceso: en Windows un WMI call individual puede
+	// colgarse y consumir todo el budget global. Acotamos a 2s por proceso
+	// para que un syscall problemático no aborte el ciclo entero.
+	const perProcTimeout = 2 * time.Second
 
 	for _, proc := range procs {
 		live[proc.Pid] = true
@@ -433,12 +439,15 @@ func collectTopProcesses(ctx context.Context, limit int) []ProcMetric {
 			cached = proc
 		}
 
-		name, err := cached.NameWithContext(ctx)
+		procCtx, cancel := context.WithTimeout(ctx, perProcTimeout)
+		name, err := cached.NameWithContext(procCtx)
 		if err != nil || name == "" {
+			cancel()
 			continue
 		}
-		cpuPercent, _ := cached.CPUPercentWithContext(ctx)
-		memPercent, _ := cached.MemoryPercentWithContext(ctx)
+		cpuPercent, _ := cached.CPUPercentWithContext(procCtx)
+		memPercent, _ := cached.MemoryPercentWithContext(procCtx)
+		cancel()
 
 		// gopsutil en Linux devuelve CPU% como suma de cores (puede pasar 100%);
 		// en Windows ya viene normalizado por core. Solo dividir en Linux.

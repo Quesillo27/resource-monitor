@@ -683,7 +683,10 @@ func (s *Store) latestProcesses(ctx context.Context, agentID string) ([]models.P
 		SELECT pid, name, cpu_percent, memory_percent
 		FROM process_samples
 		WHERE metric_sample_id = (
-			SELECT id FROM metric_samples WHERE agent_id = $1 ORDER BY captured_at DESC LIMIT 1
+			SELECT id FROM metric_samples
+			WHERE agent_id = $1
+			  AND captured_at > now() - interval '1 hour'
+			ORDER BY captured_at DESC LIMIT 1
 		)
 		ORDER BY cpu_percent DESC, memory_percent DESC
 		LIMIT 5

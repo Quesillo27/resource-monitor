@@ -570,10 +570,13 @@ function AgentDetail({ api, agentId, onBack }) {
     return { ...detail, agent_status: status };
   }, [agentId], STATUS_REFRESH_MS);
 
+  const isOffline = data?.agent?.status === 'offline';
+  const lastSeenAt = data?.agent_status?.last_seen_at || data?.agent?.last_seen_at || null;
+
   const { data: historyData, loading: historyLoading } = useLoad(
     () => api.get(`/api/agents/${agentId}/history?range=${range}`),
-    [agentId, range],
-    CHART_REFRESH_MS
+    [agentId, range, isOffline],
+    isOffline ? 0 : CHART_REFRESH_MS
   );
 
   const { data: inventory, reload: reloadInventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
@@ -611,10 +614,10 @@ function AgentDetail({ api, agentId, onBack }) {
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} />}
-          {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} />}
+          {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'disks' && <DisksTable disks={disks} />}
           {tab === 'network' && <NetworkTable networks={networks} />}
-          {tab === 'processes' && <ProcessesTable processes={processes} />}
+          {tab === 'processes' && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'services' && <ServicesTable services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
           {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} />}
@@ -652,7 +655,7 @@ function SummaryTab({ agent, status, disks, networks, services, alerts }) {
 
 const DISK_COLORS = ['#2563eb', '#059669', '#f59e0b', '#dc2626'];
 
-function ResourcesTab({ agent, history, historyLoading = false, disks: currentDisks = [], networks: currentNetworks = [], range, setRange }) {
+function ResourcesTab({ agent, history, historyLoading = false, disks: currentDisks = [], networks: currentNetworks = [], range, setRange, isOffline = false, lastSeenAt = null }) {
   const rawMetrics = history?.metrics || [];
   const rawNetwork = history?.network || history?.networks || [];
   const rawDiskHistory = history?.disks || [];
@@ -679,6 +682,12 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
           ))}
         </div>
       </div>
+      {isOffline && (
+        <div className="offline-banner" role="status">
+          <strong>Equipo offline</strong>
+          <span>Las graficas muestran el ultimo contacto{lastSeenAt ? ` (${date(lastSeenAt)})` : ''}. Sin actualizacion automatica hasta que el agente reconecte.</span>
+        </div>
+      )}
       <div className="resource-console">
         <Panel title="Informacion del servidor">
           <div className="server-facts">
@@ -1710,8 +1719,18 @@ function NetworkTable({ networks }) {
   return <DataTable empty="Sin muestras de red" columns={['Interfaz', 'Estado', 'Recibido', 'Enviado']} rows={networks.map((n) => [n.name, <span className={`net-state ${n.up ? 'up' : 'down'}`}>{n.up ? '● up' : '○ down'}</span>, bytes(n.bytes_recv), bytes(n.bytes_sent)])} />;
 }
 
-function ProcessesTable({ processes }) {
-  return <DataTable empty="Sin procesos destacados" columns={['Proceso', 'PID', 'CPU', 'RAM']} rows={processes.map((p) => [p.name, p.pid, percent(p.cpu_percent), percent(p.memory_percent)])} />;
+function ProcessesTable({ processes, isOffline = false, lastSeenAt = null }) {
+  return (
+    <>
+      {isOffline && (
+        <div className="offline-banner" role="status">
+          <strong>Equipo offline</strong>
+          <span>Procesos congelados al ultimo contacto{lastSeenAt ? ` (${date(lastSeenAt)})` : ''}. Pueden no reflejar el estado real del equipo.</span>
+        </div>
+      )}
+      <DataTable empty="Sin procesos destacados" columns={['Proceso', 'PID', 'CPU', 'RAM']} rows={processes.map((p) => [p.name, p.pid, percent(p.cpu_percent), percent(p.memory_percent)])} />
+    </>
+  );
 }
 
 function ServicesTable({ services }) {

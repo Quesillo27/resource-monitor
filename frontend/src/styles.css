@@ -947,6 +947,30 @@ tbody tr:last-child td { border-bottom: 0; }
   padding: 12px 16px;
 }
 
+/* ── Offline banner ── */
+.offline-banner {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 16px;
+  align-items: baseline;
+}
+.offline-banner strong {
+  color: #ef4444;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.offline-banner span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .ops-grid { display: grid; gap: 8px; }
 
 .ops-grid code, .command-box code {
