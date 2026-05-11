@@ -20,27 +20,39 @@ Traefik (o nginx) sirve el frontend y proxy-pasa `/api/*` al backend. El fronten
 
 ## Quickstart
 
-**Requisitos:** Docker + Docker Compose v2 + git (ya viene en cualquier instalación normal).
+**Requisitos:** Docker + Docker Compose v2 + git.
 
 ```bash
 git clone https://github.com/Quesillo27/resource-monitor.git
 cd resource-monitor
-
-# 1. Crear .env (ver sección de variables abajo)
-cp .env.example .env
-$EDITOR .env
-
-# 2. Levantar todo
-docker compose up -d --build
+./install.sh
 ```
 
-Eso levanta:
-- `postgres` en red interna
-- `backend` en `:8080`
-- `frontend` en `:3000` (dev) o `:3010` (prod)
-- `agent-assets` — servicio **continuo** que detecta cambios en el commit git y recompila los binarios automáticamente
+El script genera `.env` con secrets aleatorios, levanta los contenedores y al final imprime URL + credenciales por defecto:
 
-Abrí la consola y entrá con las credenciales iniciales del `.env`.
+```
+URL:      http://localhost:3000
+Usuario:  admin
+Password: admin
+```
+
+Cambia la contraseña editando `.env` y reiniciando con `docker compose down && docker compose up -d`.
+
+### Troubleshooting
+
+- **`Cannot connect to the Docker daemon`** — Docker no está corriendo. En Linux: `sudo systemctl start docker`. En Mac/Windows: abre Docker Desktop.
+- **Puerto 3000 u 8080 ocupado** — edita `.env`, ajusta los `ports:` en `docker-compose.yml`, o detén el proceso que los usa (`lsof -i :3000`).
+- **El backend tarda mucho en responder** — el primer build descarga ~500 MB de imágenes y compila Go. Normal que tome 2-3 min. Sigue el progreso con `docker compose logs -f backend`.
+- **`agent-assets unhealthy`** — necesita el directorio `.git`. Si clonaste con `--depth 1` o copiaste sin `.git`, el contenedor no puede derivar versión. Soluciónalo con un `git clone` completo.
+
+### Levantar manualmente (sin install.sh)
+
+Si prefieres ver qué pasa:
+
+```bash
+cp .env.example .env   # edita JWT_SECRET (>=32 chars), ADMIN_PASSWORD, POSTGRES_PASSWORD
+docker compose up -d --build
+```
 
 ## Flujo de actualización (automático)
 

@@ -19,6 +19,12 @@ const (
 	metricOffline     = "agent_offline_minutes"
 )
 
+// advisoryLockAlertRulesSchema is an arbitrary fixed int64 used as a Postgres
+// advisory lock key. It serializes concurrent first-startup migrations so the
+// CREATE TABLE / CREATE TYPE statements below cannot race on pg_type and trip
+// SQLSTATE 23505 on pg_type_typname_nsp_index.
+const advisoryLockAlertRulesSchema int64 = 7591
+
 func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 	statements := []string{
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS rule_id UUID",
@@ -72,12 +78,21 @@ func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
 			('agent_offline_minutes', '', 'critical', true, 10, 1, true, false, 30, 'Equipo sin conexion critical')
 		 ON CONFLICT DO NOTHING`,
 	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", advisoryLockAlertRulesSchema); err != nil {
+		return err
+	}
 	for _, statement := range statements {
-		if _, err := s.pool.Exec(ctx, statement); err != nil {
+		if _, err := tx.Exec(ctx, statement); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Store) ListDefaultAlertRules(ctx context.Context) ([]models.AlertRule, error) {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -33,6 +34,15 @@ func Load() Config {
 		log.Fatal("ADMIN_PASSWORD must be set to a secure value (not empty or default)")
 	}
 
+	dbURL := env("DATABASE_URL", "postgres://monitor:monitor_pass@localhost:5432/resource_monitor?sslmode=disable")
+	if u, err := url.Parse(dbURL); err != nil {
+		log.Fatalf("DATABASE_URL inválida (no parsea): %v — revisa caracteres especiales en password (encode '%%', '@', '/', ':' como %%25, %%40, %%2F, %%3A)", err)
+	} else if u.Scheme != "postgres" && u.Scheme != "postgresql" {
+		log.Fatalf("DATABASE_URL inválida: scheme '%s' (esperado 'postgres' o 'postgresql')", u.Scheme)
+	} else if u.Host == "" {
+		log.Fatal("DATABASE_URL inválida: falta host (formato esperado: postgres://user:pass@host:port/db)")
+	}
+
 	origins := strings.Split(env("ALLOWED_ORIGINS", ""), ",")
 	var filtered []string
 	for _, o := range origins {
@@ -42,7 +52,7 @@ func Load() Config {
 	}
 
 	return Config{
-		DatabaseURL:         env("DATABASE_URL", "postgres://monitor:monitor_pass@localhost:5432/resource_monitor?sslmode=disable"),
+		DatabaseURL:         dbURL,
 		JWTSecret:           secret,
 		AdminUsername:       env("ADMIN_USERNAME", "admin"),
 		AdminPassword:       adminPass,
