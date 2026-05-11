@@ -24,6 +24,7 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-monitor}:${POSTGRES_PASSWORD:-monitor_pass}@postgres:5432/${POSTGRES_DB:-resource_monitor}?sslmode=disable
       SERVER_ADDR: ":8080"
+      MANAGER_BUILD_SHA: ${MANAGER_BUILD_SHA:-}
     ports:
       - "8080:8080"
     volumes:

@@ -18,6 +18,7 @@ type Config struct {
 	AllowedOrigins       []string
 	AgentReleaseVersion  string
 	ManagerVersion       string
+	ManagerBuildSHA      string
 }
 
 func Load() Config {
@@ -53,6 +54,7 @@ func Load() Config {
 		AllowedOrigins:      filtered,
 		AgentReleaseVersion: env("AGENT_RELEASE_VERSION", "dev"),
 		ManagerVersion:      env("MANAGER_VERSION", "dev"),
+		ManagerBuildSHA:     env("MANAGER_BUILD_SHA", ""),
 	}
 }
 

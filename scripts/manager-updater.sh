@@ -89,9 +89,10 @@ run_update() {
   fi
 
   write_status "restarting" "$FROM" "$TO" "" "$STARTED"
-  # 'up -d' aplica las imágenes nuevas. El backend va a morir mientras este
-  # script (que corre en otro container) sigue vivo.
-  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d backend frontend 2>&1); then
+  # 'up -d' aplica las imágenes nuevas. Pasamos MANAGER_BUILD_SHA al backend
+  # para que pueda reportar el sha real que está corriendo (vs. el HEAD del
+  # repo del updater, que pueden divergir momentáneamente).
+  if ! (cd "$REPO" && MANAGER_BUILD_SHA="$TO" docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d backend frontend 2>&1); then
     write_status "failed" "$FROM" "$TO" "compose up falló" "$STARTED"
     echo "[updater] FAIL compose up" >&2
     return 1

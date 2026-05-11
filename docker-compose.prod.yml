@@ -30,6 +30,7 @@ services:
       OFFLINE_AFTER_SECONDS: ${OFFLINE_AFTER_SECONDS:-180}
       AGENT_RELEASE_VERSION: ${AGENT_RELEASE_VERSION:-v1.0.0}
       MANAGER_VERSION: ${MANAGER_VERSION:-v0.0.0}
+      MANAGER_BUILD_SHA: ${MANAGER_BUILD_SHA:-}
     volumes:
       - agent-downloads:/downloads:ro
       - manager-triggers:/triggers

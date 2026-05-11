@@ -735,19 +735,34 @@ const (
 )
 
 func (s *Server) managerVersion(w http.ResponseWriter, r *http.Request) {
+	// "current" = sha del binario que está corriendo (inyectado en build).
+	// "latest" = sha del HEAD del repo remoto (lo escribe el manager-updater).
+	// Si el binario no fue buildeado con MANAGER_BUILD_SHA (legacy), reporta
+	// "unknown"; el frontend tratará eso como "puede haber update".
+	current := s.cfg.ManagerBuildSHA
+	if current == "" {
+		current = "unknown"
+	}
 	out := map[string]any{
 		"version":          s.cfg.ManagerVersion,
-		"current":          "unknown",
+		"current":          current,
 		"latest":           "unknown",
 		"update_available": false,
 	}
 	if data, err := os.ReadFile(managerVersionInfoPath); err == nil {
 		var info map[string]any
 		if json.Unmarshal(data, &info) == nil {
-			for _, k := range []string{"current", "latest", "behind", "update_available", "checked_at"} {
-				if v, ok := info[k]; ok {
-					out[k] = v
-				}
+			if v, ok := info["latest"].(string); ok {
+				out["latest"] = v
+			}
+			if v, ok := info["checked_at"]; ok {
+				out["checked_at"] = v
+			}
+			// update_available real: comparar el sha buildeado del backend
+			// contra el HEAD remoto. Si current==unknown, asumir que sí hay
+			// update (forza a mostrar el botón para romper deadlocks).
+			if latest, ok := info["latest"].(string); ok && latest != "unknown" {
+				out["update_available"] = current == "unknown" || current != latest
 			}
 		}
 	}
