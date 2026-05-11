@@ -2092,23 +2092,24 @@ function useLoad(loader, deps, refreshMs = 0) {
 
 function ManagerUpdateButton({ api }) {
   const [status, setStatus] = useState({ state: 'idle' });
+  const [version, setVersion] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // Polling: rápido si hay update activo, lento si está idle/done/failed.
+  // Polling combinado: estado del update + info de versión (current vs latest).
   useEffect(() => {
     let alive = true;
-    const tick = () => api.get('/api/manager/update/status')
-      .then((s) => alive && setStatus(s || { state: 'idle' }))
-      .catch(() => {});
+    const tick = () => {
+      api.get('/api/manager/update/status').then((s) => alive && setStatus(s || { state: 'idle' })).catch(() => {});
+      api.get('/api/manager/version').then((v) => alive && setVersion(v)).catch(() => {});
+    };
     tick();
     const active = ['pulling', 'building_backend', 'building_frontend', 'restarting'].includes(status.state);
-    const period = active ? 2000 : 15_000;
+    const period = active ? 2000 : 30_000;
     const timer = setInterval(tick, period);
     return () => { alive = false; clearInterval(timer); };
   }, [status.state]);
 
   const labels = {
-    idle: 'Actualizar manager',
     pulling: 'Descargando código…',
     building_backend: 'Compilando backend…',
     building_frontend: 'Compilando frontend…',
@@ -2117,7 +2118,7 @@ function ManagerUpdateButton({ api }) {
     failed: '✗ Falló',
   };
   const isActive = ['pulling', 'building_backend', 'building_frontend', 'restarting'].includes(status.state);
-  const label = labels[status.state] || status.state;
+  const updateAvailable = !!version?.update_available;
 
   async function trigger() {
     if (isActive) return;
@@ -2134,16 +2135,42 @@ function ManagerUpdateButton({ api }) {
     }
   }
 
+  // Caso 1: update activo o recién terminado → mostrar siempre con su estado.
+  if (isActive || status.state === 'failed' || status.state === 'done') {
+    return (
+      <button
+        className="logout manager-update"
+        onClick={trigger}
+        disabled={isActive || busy}
+        title={status.state === 'failed' && status.error ? `Último intento: ${status.error}` : (status.to ? `${status.from || '?'} → ${status.to}` : '')}
+      >
+        <Download size={18} />
+        {labels[status.state] || status.state}
+      </button>
+    );
+  }
+
+  // Caso 2: hay update disponible → botón clickable.
+  if (updateAvailable) {
+    return (
+      <button
+        className="logout manager-update"
+        onClick={trigger}
+        disabled={busy}
+        title={`${version.current} → ${version.latest} (${version.behind} commit${version.behind === 1 ? '' : 's'} atrás)`}
+      >
+        <Download size={18} />
+        ↓ Actualizar manager
+      </button>
+    );
+  }
+
+  // Caso 3: al día → solo mostrar versión actual, sin botón.
+  const verLabel = version?.version ? `${version.version}${version.current && version.current !== 'unknown' ? ` (${version.current})` : ''}` : 'manager';
   return (
-    <button
-      className="logout manager-update"
-      onClick={trigger}
-      disabled={isActive || busy}
-      title={status.state === 'failed' && status.error ? `Último intento: ${status.error}` : (status.to ? `${status.from || '?'} → ${status.to}` : 'Self-update del manager')}
-    >
-      <Download size={18} />
-      {label}
-    </button>
+    <div className="manager-version" title="Manager al día. Esta zona muestra el botón solo cuando hay update disponible.">
+      {verLabel}
+    </div>
   );
 }
 

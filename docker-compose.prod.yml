@@ -29,6 +29,7 @@ services:
       RETENTION_DAYS: ${RETENTION_DAYS:-30}
       OFFLINE_AFTER_SECONDS: ${OFFLINE_AFTER_SECONDS:-180}
       AGENT_RELEASE_VERSION: ${AGENT_RELEASE_VERSION:-v1.0.0}
+      MANAGER_VERSION: ${MANAGER_VERSION:-v0.0.0}
     volumes:
       - agent-downloads:/downloads:ro
       - manager-triggers:/triggers
@@ -71,10 +72,10 @@ services:
       sh -c "apk add --no-cache git ca-certificates >/dev/null &&
       LAST_SHA='' &&
       while true; do
-        CURRENT_SHA=$$(cd /src && git rev-parse --short HEAD 2>/dev/null || echo unknown);
+        CURRENT_SHA=$$(cd /src && git log -1 --format=%h -- agent/ scripts/install-agent.sh scripts/install-agent.ps1 2>/dev/null || echo unknown);
         if [ \"$$CURRENT_SHA\" != \"$$LAST_SHA\" ]; then
           VERSION=\"${AGENT_RELEASE_VERSION:-v1.0.0}-$$CURRENT_SHA\";
-          echo \"[agent-assets] $$LAST_SHA -> $$CURRENT_SHA (compilando $$VERSION)\";
+          echo \"[agent-assets] $$LAST_SHA -> $$CURRENT_SHA (compilando $$VERSION; ultimo cambio agente)\";
           rm -rf /work/agent && mkdir -p /work/agent && cp -R /src/agent/. /work/agent/ &&
           cd /work/agent && go mod tidy &&
           GOOS=linux   GOARCH=amd64 CGO_ENABLED=0 go build -ldflags \"-X resource-monitor/agent/internal/version.Version=$$VERSION\" -o /downloads/.next-linux-amd64 ./cmd/agent &&

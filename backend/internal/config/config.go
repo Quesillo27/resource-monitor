@@ -17,6 +17,7 @@ type Config struct {
 	OfflineAfterSeconds  int
 	AllowedOrigins       []string
 	AgentReleaseVersion  string
+	ManagerVersion       string
 }
 
 func Load() Config {
@@ -51,6 +52,7 @@ func Load() Config {
 		OfflineAfterSeconds: envInt("OFFLINE_AFTER_SECONDS", 180),
 		AllowedOrigins:      filtered,
 		AgentReleaseVersion: env("AGENT_RELEASE_VERSION", "dev"),
+		ManagerVersion:      env("MANAGER_VERSION", "dev"),
 	}
 }
 

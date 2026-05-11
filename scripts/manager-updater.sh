@@ -14,8 +14,11 @@ set -u
 
 TRIGGER="/triggers/update.requested"
 STATUS="/triggers/status.json"
+VERSION_INFO="/triggers/version-info.json"
 LOCK="/triggers/.lock"
 REPO="/repo"
+# Cada cuanto el updater hace 'git fetch' + actualiza version-info.json (segs).
+VERSION_CHECK_PERIOD="${VERSION_CHECK_PERIOD:-60}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 # Forzar el project name para evitar que docker compose use el dirname de
 # /repo (que generaria containers "repo-*" paralelos al stack original).
@@ -99,13 +102,36 @@ run_update() {
   return 0
 }
 
-echo "[updater] vigilando $TRIGGER (compose=$COMPOSE_FILE)"
+# Hace 'git fetch' (no muta el working tree) y compara HEAD local vs remoto,
+# escribe version-info.json para que la UI sepa si hay update disponible.
+update_version_info() {
+  cd "$REPO" || return 0
+  git fetch --quiet origin 2>/dev/null || true
+  CURRENT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  LATEST="$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo unknown)"
+  BEHIND="$(git rev-list --count HEAD..origin/main 2>/dev/null || git rev-list --count HEAD..origin/master 2>/dev/null || echo 0)"
+  AVAILABLE="false"
+  [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ] && AVAILABLE="true"
+  cat > "$VERSION_INFO.tmp" <<EOF
+{"current":"$CURRENT","latest":"$LATEST","behind":$BEHIND,"update_available":$AVAILABLE,"checked_at":"$(now)"}
+EOF
+  mv -f "$VERSION_INFO.tmp" "$VERSION_INFO"
+  chmod 666 "$VERSION_INFO" 2>/dev/null || true
+}
 
+# Inicial: dar info enseguida al arrancar.
+update_version_info
+
+echo "[updater] vigilando $TRIGGER (compose=$COMPOSE_FILE, version-check=${VERSION_CHECK_PERIOD}s)"
+
+LAST_VERSION_CHECK=0
 while true; do
   if [ -f "$TRIGGER" ]; then
     if mkdir "$LOCK" 2>/dev/null; then
       rm -f "$TRIGGER"
       run_update || true
+      # Refrescar version-info inmediatamente después del update.
+      update_version_info
       rmdir "$LOCK" 2>/dev/null || true
     else
       # Otro update en curso (no debería pasar). Borrar trigger igual para evitar
@@ -113,6 +139,12 @@ while true; do
       rm -f "$TRIGGER"
       echo "[updater] update ya en curso, ignorando trigger"
     fi
+  fi
+  # Periodicamente refrescar info de version (sin git pull, solo fetch).
+  NOW_TS="$(date +%s)"
+  if [ $((NOW_TS - LAST_VERSION_CHECK)) -ge "$VERSION_CHECK_PERIOD" ]; then
+    update_version_info
+    LAST_VERSION_CHECK="$NOW_TS"
   fi
   sleep 2
 done

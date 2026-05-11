@@ -126,6 +126,27 @@ nav button.active {
 
 .logout:hover { color: #e2e8f0; }
 
+/* Botón self-update destacado cuando hay update disponible. */
+.manager-update {
+  background: rgba(56, 189, 248, 0.12);
+  color: #7dd3fc;
+  margin-top: auto;
+}
+.manager-update:hover { background: rgba(56, 189, 248, 0.2); color: #bae6fd; }
+.manager-update:disabled { opacity: 0.6; cursor: default; }
+
+/* Cuando el manager está al día: solo muestra la versión, sin botón. */
+.manager-version {
+  align-items: center;
+  color: var(--sidebar-muted);
+  display: flex;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin-top: auto;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
 /* ── Main content ── */
 main {
   overflow: auto;

@@ -113,6 +113,7 @@ func (s *Server) Routes() http.Handler {
 			// estado, pero solo admin puede disparar el update. El handler escribe
 			// un archivo trigger en un volumen compartido con el container
 			// manager-updater (que ejecuta git pull + docker compose build/up).
+			r.With(s.requireRole("admin")).Get("/manager/version", s.managerVersion)
 			r.With(s.requireRole("admin")).Get("/manager/update/status", s.managerUpdateStatus)
 			r.With(s.requireRole("admin")).Post("/manager/update", s.managerUpdateTrigger)
 		})
@@ -728,9 +729,30 @@ func (s *Server) agentVersion(w http.ResponseWriter, r *http.Request) {
 // Volumen compartido con el container manager-updater. El backend escribe el
 // trigger y lee el status; el updater procesa el trigger fuera del proceso.
 const (
-	managerTriggerPath = "/triggers/update.requested"
-	managerStatusPath  = "/triggers/status.json"
+	managerTriggerPath     = "/triggers/update.requested"
+	managerStatusPath      = "/triggers/status.json"
+	managerVersionInfoPath = "/triggers/version-info.json"
 )
+
+func (s *Server) managerVersion(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{
+		"version":          s.cfg.ManagerVersion,
+		"current":          "unknown",
+		"latest":           "unknown",
+		"update_available": false,
+	}
+	if data, err := os.ReadFile(managerVersionInfoPath); err == nil {
+		var info map[string]any
+		if json.Unmarshal(data, &info) == nil {
+			for _, k := range []string{"current", "latest", "behind", "update_available", "checked_at"} {
+				if v, ok := info[k]; ok {
+					out[k] = v
+				}
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 func (s *Server) managerUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(managerStatusPath)
