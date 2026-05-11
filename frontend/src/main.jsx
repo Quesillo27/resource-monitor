@@ -86,8 +86,10 @@ function Shell({ token, view, setView, onLogout }) {
             </button>
           ))}
         </nav>
-        <ManagerUpdateButton api={api} />
-        <button className="logout" onClick={onLogout}><LogOut size={18} />Salir</button>
+        <div className="sidebar-bottom">
+          <ManagerUpdateButton api={api} />
+          <button className="logout" onClick={onLogout}><LogOut size={18} />Salir</button>
+        </div>
       </aside>
       <main>
         {view === 'dashboard' && <Dashboard api={api} navigateTo={navigateTo} />}

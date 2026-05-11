@@ -109,6 +109,14 @@ nav button.active {
   font-weight: 600;
 }
 
+/* Wrapper que agrupa botón self-update + logout pegados al fondo. */
+.sidebar-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+}
+
 .logout {
   align-items: center;
   background: transparent;
@@ -118,7 +126,6 @@ nav button.active {
   display: flex;
   font-size: 13px;
   gap: 10px;
-  margin-top: auto;
   min-height: 38px;
   padding: 0 10px;
   transition: color 0.15s;
@@ -130,7 +137,6 @@ nav button.active {
 .manager-update {
   background: rgba(56, 189, 248, 0.12);
   color: #7dd3fc;
-  margin-top: auto;
 }
 .manager-update:hover { background: rgba(56, 189, 248, 0.2); color: #bae6fd; }
 .manager-update:disabled { opacity: 0.6; cursor: default; }
@@ -142,7 +148,6 @@ nav button.active {
   display: flex;
   font-size: 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  margin-top: auto;
   min-height: 38px;
   padding: 0 10px;
 }
