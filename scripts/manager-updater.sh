@@ -55,6 +55,21 @@ if [ -z "$HOST_REPO" ]; then
 fi
 echo "[updater] HOST_REPO=$HOST_REPO (paths relativos del compose se resuelven contra ese)"
 
+# Symlink critico: el daemon docker espera bind mounts con paths del HOST
+# (ej: /root/resource-monitor/agent). El cliente compose CLI, sin embargo,
+# necesita leer archivos reales del contexto (build context, .env) y vive
+# dentro del container manager-updater donde el repo esta en /repo. Sin un
+# puente, el cliente busca /root/resource-monitor/backend para tar el build
+# context, no lo encuentra (no existe en el FS del container), y falla con
+# 'path not found'. Con este symlink, el path host resuelve transparente al
+# repo montado en /repo y el cliente puede leer todos los archivos.
+if [ "$HOST_REPO" != "$REPO" ] && [ ! -e "$HOST_REPO" ]; then
+  mkdir -p "$(dirname "$HOST_REPO")" 2>/dev/null || true
+  ln -sf "$REPO" "$HOST_REPO" 2>/dev/null && \
+    echo "[updater] symlink creado: $HOST_REPO -> $REPO (para que el cliente compose lea contexto/.env)" || \
+    echo "[updater] WARN: no pude crear symlink $HOST_REPO -> $REPO" >&2
+fi
+
 # Wrapper que invoca docker compose con --project-directory apuntando al path
 # host. Reemplaza todas las llamadas anteriores 'cd $REPO && docker compose ...'.
 dc() {
