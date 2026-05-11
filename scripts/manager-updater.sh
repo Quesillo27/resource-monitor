@@ -101,11 +101,25 @@ run_update() {
   write_status "done" "$FROM" "$TO" "" "$STARTED"
   echo "[updater] DONE $FROM -> $TO"
 
+  CHANGED_FILES="$(cd "$REPO" && git diff --name-only "$FROM" "$TO" 2>/dev/null || echo)"
+
+  # Si tocaron cualquier archivo del agente o los scripts de instalacion, forzar
+  # recreate de agent-assets para que recompile los binarios y los publique en
+  # /downloads. Su watcher interno suele detectar el cambio de SHA, pero un
+  # --force-recreate garantiza que el container arranque con mounts y working
+  # dir actualizados (evita que un bind mount obsoleto deje binarios viejos
+  # publicados indefinidamente, como pasaria en un host donde el repo se movio
+  # de path).
+  if echo "$CHANGED_FILES" | grep -qE "^(agent/|scripts/install-agent\.)"; then
+    echo "[updater] cambios en agent/, recreando agent-assets..."
+    (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate agent-assets 2>&1) || \
+      echo "[updater] WARN: no pude recrear agent-assets, su watcher interno intentara compilar" >&2
+  fi
+
   # Si el propio script cambio en este pull, recrear el container manager-updater
   # para que cargue la version nueva. El docker compose mata este container y
   # arranca uno nuevo con el script actualizado. El status ya quedo en "done"
   # asi que la UI no ve el restart.
-  CHANGED_FILES="$(cd "$REPO" && git diff --name-only "$FROM" "$TO" 2>/dev/null || echo)"
   if echo "$CHANGED_FILES" | grep -q "scripts/manager-updater.sh"; then
     echo "[updater] el script cambio, recreando manager-updater..."
     (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --force-recreate manager-updater) &

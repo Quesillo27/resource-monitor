@@ -69,6 +69,18 @@ services:
       start_period: 60s
     command: >
       sh -c "apk add --no-cache git ca-certificates >/dev/null &&
+      if ! (cd /src && git rev-parse --git-dir >/dev/null 2>&1); then
+        echo '[agent-assets] FATAL: /src/.git no es un repo git valido.' >&2;
+        echo '[agent-assets] Probablemente el container fue creado desde un path equivocado.' >&2;
+        echo '[agent-assets] Solucion: cd al directorio del repo y ejecuta:' >&2;
+        echo '[agent-assets]   docker compose -p resource-monitor -f docker-compose.prod.yml up -d --force-recreate agent-assets' >&2;
+        exit 1;
+      fi;
+      if [ ! -f /src/agent/go.mod ]; then
+        echo '[agent-assets] FATAL: /src/agent/go.mod no existe (mount invalido).' >&2;
+        exit 1;
+      fi;
+      echo '[agent-assets] mounts validados, iniciando watcher';
       LAST_SHA='' &&
       while true; do
         CURRENT_SHA=$$(cd /src && git log -1 --format=%h -- agent/ scripts/install-agent.sh scripts/install-agent.ps1 2>/dev/null || echo unknown);
