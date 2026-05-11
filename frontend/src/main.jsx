@@ -33,8 +33,8 @@ import './resources-polish.css';
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 const REFRESH_MS       = 60_000; // overview + alertas
 const LIST_REFRESH_MS  = 30_000; // lista de agentes
-const STATUS_REFRESH_MS =  5_000; // estado/detail del agente
-const CHART_REFRESH_MS = 15_000; // historial para graficas
+const STATUS_REFRESH_MS = 10_000; // estado/detail del agente
+const CHART_REFRESH_MS = 30_000; // historial para graficas
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('rm_token') || '');
@@ -569,7 +569,7 @@ function AgentDetail({ api, agentId, onBack }) {
     CHART_REFRESH_MS
   );
 
-  const { data: inventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
+  const { data: inventory, reload: reloadInventory } = useLoad(() => api.get(`/api/agents/${agentId}/inventory`), [agentId], 0);
   const agent = data?.agent;
   const disks = sortBy(data?.disks || [], (disk) => disk.used_percent);
   const networks = sortBy(data?.networks || [], (net) => net.up ? 0 : 1);
@@ -611,8 +611,8 @@ function AgentDetail({ api, agentId, onBack }) {
           {tab === 'services' && <ServicesTable services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
           {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} />}
-          {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} />}
-          {tab === 'software' && <SoftwareTab software={inventory?.software} />}
+          {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} onRefresh={reloadInventory} />}
+          {tab === 'software' && <SoftwareTab software={inventory?.software} onRefresh={reloadInventory} />}
         </>
       )}
     </section>
@@ -1713,7 +1713,7 @@ function DataTable({ columns, rows, empty }) {
   return <div className="table-wrap"><table><thead><tr>{columns.map((col) => <th key={col}>{col}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}{!rows.length && <tr><td colSpan={columns.length} className="empty">{empty}</td></tr>}</tbody></table></div>;
 }
 
-function HardwareTab({ hardware }) {
+function HardwareTab({ hardware, onRefresh }) {
   if (!hardware) return <EmptyState icon="🖥️" title="Sin datos de hardware" subtitle="El agente enviará el inventario de hardware en su próxima sincronización (24h)." />;
   const rows = [
     ['CPU', hardware.cpu_model || '—'],
@@ -1728,24 +1728,32 @@ function HardwareTab({ hardware }) {
     ['Capturado', hardware.captured_at ? new Date(hardware.captured_at).toLocaleString() : '—'],
   ];
   return (
-    <div className="hw-grid">
-      {rows.map(([label, value]) => (
-        <div key={label} className="hw-row">
-          <span className="hw-label">{label}</span>
-          <span className="hw-value">{value}</span>
+    <div>
+      {onRefresh && (
+        <div className="actions" style={{ marginBottom: 12 }}>
+          <IconButton icon={RefreshCw} onClick={onRefresh} label="Actualizar inventario" />
         </div>
-      ))}
+      )}
+      <div className="hw-grid">
+        {rows.map(([label, value]) => (
+          <div key={label} className="hw-row">
+            <span className="hw-label">{label}</span>
+            <span className="hw-value">{value}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
-function SoftwareTab({ software }) {
+function SoftwareTab({ software, onRefresh }) {
   const [q, setQ] = useState('');
   if (!software) return <EmptyState icon="📦" title="Sin inventario de software" subtitle="El agente enviará el inventario en su próxima sincronización (24h)." />;
   const filtered = q ? software.filter((s) => s.name.toLowerCase().includes(q.toLowerCase()) || (s.publisher || '').toLowerCase().includes(q.toLowerCase())) : software;
   return (
     <div>
       <div className="sw-search">
+        {onRefresh && <IconButton icon={RefreshCw} onClick={onRefresh} label="Actualizar inventario" />}
         <input className="sw-input" placeholder={`Buscar en ${software.length} programas...`} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       <DataTable
@@ -2090,11 +2098,28 @@ function createApi(token, onUnauthorized) {
   };
 }
 
+// Cache por URL+method para soportar respuestas 304 (Not Modified) del backend.
+// Si el server devuelve 304, retornamos la misma referencia del último payload,
+// lo que permite a React saltarse el re-render (bail-out por identidad).
+const responseCache = new Map();
+
+function cacheKey(method, path) {
+  return `${(method || 'GET').toUpperCase()} ${path}`;
+}
+
 async function request(path, options, token, onUnauthorized) {
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } });
-  const data = await res.json();
+  const method = (options && options.method) || 'GET';
+  const key = cacheKey(method, path);
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const cached = responseCache.get(key);
+  if (cached?.etag) headers['If-None-Match'] = cached.etag;
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 304 && cached) return cached.data;
   if (res.status === 401) onUnauthorized?.();
-  if (!res.ok) throw new Error(data.error || res.statusText);
+  const data = res.status === 204 ? null : await res.json();
+  if (!res.ok) throw new Error((data && data.error) || res.statusText);
+  const etag = res.headers.get('ETag');
+  if (etag && method === 'GET') responseCache.set(key, { etag, data });
   return data;
 }
 

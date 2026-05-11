@@ -505,11 +505,7 @@ func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds 
 	if err != nil {
 		return nil, err
 	}
-	history, err := s.metricHistory(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"agent": agent, "disks": disks, "networks": networks, "processes": processes, "services": services, "history": history}, nil
+	return map[string]any{"agent": agent, "disks": disks, "networks": networks, "processes": processes, "services": services}, nil
 }
 
 func (s *Store) UpdateAgentName(ctx context.Context, id, name string) error {
@@ -732,34 +728,6 @@ func (s *Store) latestServices(ctx context.Context, agentID string) ([]models.Sv
 		services = append(services, service)
 	}
 	return services, rows.Err()
-}
-
-func (s *Store) metricHistory(ctx context.Context, agentID string) ([]map[string]any, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT captured_at, cpu_percent, memory_used_percent
-		FROM metric_samples
-		WHERE agent_id = $1 AND captured_at > now() - interval '24 hours'
-		ORDER BY captured_at ASC
-	`, agentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	history := []map[string]any{}
-	for rows.Next() {
-		var capturedAt time.Time
-		var cpu, memory float64
-		if err := rows.Scan(&capturedAt, &cpu, &memory); err != nil {
-			return nil, err
-		}
-		history = append(history, map[string]any{
-			"captured_at":         capturedAt,
-			"cpu_percent":         cpu,
-			"memory_used_percent": memory,
-		})
-	}
-	return history, rows.Err()
 }
 
 func evaluateAlerts(ctx context.Context, tx pgx.Tx, agentID string, req models.MetricsRequest) (string, map[string]bool, error) {

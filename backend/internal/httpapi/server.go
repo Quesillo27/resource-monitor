@@ -1,6 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -45,6 +48,7 @@ func (s *Server) Routes() http.Handler {
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.Compress(5))
 	r.Use(s.cors)
 
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +203,7 @@ func (s *Server) agentDetail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "agent detail failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	writeJSONWithETag(w, r, http.StatusOK, detail)
 }
 
 func (s *Server) agentHistory(w http.ResponseWriter, r *http.Request) {
@@ -212,7 +216,7 @@ func (s *Server) agentHistory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "agent history failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, history)
+	writeJSONWithETag(w, r, http.StatusOK, history)
 }
 
 func (s *Server) agentNetworks(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +309,7 @@ func (s *Server) agentStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "agent status failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, status)
+	writeJSONWithETag(w, r, http.StatusOK, status)
 }
 
 func (s *Server) listAlerts(w http.ResponseWriter, r *http.Request) {
@@ -712,7 +716,7 @@ func (s *Server) getAgentInventory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "inventory fetch failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, inv)
+	writeJSONWithETag(w, r, http.StatusOK, inv)
 }
 
 func (s *Server) agentVersion(w http.ResponseWriter, r *http.Request) {
@@ -737,6 +741,27 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// writeJSONWithETag serializa el payload, calcula un ETag (sha256[:8] hex) y
+// devuelve 304 si el cliente envía If-None-Match coincidente. Útil en endpoints
+// de polling que devuelven datos frecuentemente sin cambios.
+func writeJSONWithETag(w http.ResponseWriter, r *http.Request, status int, payload any) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+		writeError(w, http.StatusInternalServerError, "encode failed")
+		return
+	}
+	sum := sha256.Sum256(buf.Bytes())
+	etag := `"` + hex.EncodeToString(sum[:8]) + `"`
+	w.Header().Set("ETag", etag)
+	if match := r.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
@@ -764,7 +789,7 @@ func (s *Server) cors(next http.Handler) http.Handler {
 		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Cache-Control", "no-cache, private")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
