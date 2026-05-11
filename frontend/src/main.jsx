@@ -31,7 +31,7 @@ import {
 import './styles.css';
 import './resources-polish.css';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 const REFRESH_MS       = 60_000; // overview + alertas
 const LIST_REFRESH_MS  = 30_000; // lista de agentes
 const STATUS_REFRESH_MS = 10_000; // estado/detail del agente
