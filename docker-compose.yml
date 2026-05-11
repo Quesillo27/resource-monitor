@@ -41,6 +41,7 @@ services:
       - manager-triggers:/triggers
     environment:
       COMPOSE_FILE: docker-compose.yml
+      PROJECT_NAME: resource-monitor
     working_dir: /repo
     restart: unless-stopped
     command: ["sh", "/repo/scripts/manager-updater.sh"]

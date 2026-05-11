@@ -17,6 +17,9 @@ STATUS="/triggers/status.json"
 LOCK="/triggers/.lock"
 REPO="/repo"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+# Forzar el project name para evitar que docker compose use el dirname de
+# /repo (que generaria containers "repo-*" paralelos al stack original).
+PROJECT_NAME="${PROJECT_NAME:-resource-monitor}"
 
 # Asegurar git instalado (docker:cli base no lo trae).
 if ! command -v git >/dev/null 2>&1; then
@@ -26,9 +29,15 @@ if ! command -v git >/dev/null 2>&1; then
   }
 fi
 
+# /triggers debe ser escribible por el backend (uid 1000) para que pueda
+# crear el archivo trigger. Sticky bit estilo /tmp para que cada proceso
+# borre solo lo suyo.
+chmod 1777 /triggers 2>/dev/null || true
+
 # Estado inicial si no existe.
 if [ ! -f "$STATUS" ]; then
   printf '%s\n' '{"state":"idle","from":null,"to":null,"error":null,"started_at":null,"updated_at":null}' > "$STATUS"
+  chmod 666 "$STATUS" 2>/dev/null || true
 fi
 
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -43,6 +52,7 @@ write_status() {
 {"state":"$state","from":$(fmt "$from"),"to":$(fmt "$to"),"error":$(fmt "$err"),"started_at":$(fmt "$started"),"updated_at":"$(now)"}
 EOF
   mv -f "$STATUS.tmp" "$STATUS"
+  chmod 666 "$STATUS" 2>/dev/null || true
 }
 
 run_update() {
@@ -62,14 +72,14 @@ run_update() {
   echo "[updater] pulled: $FROM -> $TO"
 
   write_status "building_backend" "$FROM" "$TO" "" "$STARTED"
-  if ! (cd "$REPO" && docker compose -f "$COMPOSE_FILE" build backend 2>&1); then
+  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build backend 2>&1); then
     write_status "failed" "$FROM" "$TO" "build backend falló" "$STARTED"
     echo "[updater] FAIL build backend" >&2
     return 1
   fi
 
   write_status "building_frontend" "$FROM" "$TO" "" "$STARTED"
-  if ! (cd "$REPO" && docker compose -f "$COMPOSE_FILE" build frontend 2>&1); then
+  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" build frontend 2>&1); then
     write_status "failed" "$FROM" "$TO" "build frontend falló" "$STARTED"
     echo "[updater] FAIL build frontend" >&2
     return 1
@@ -78,7 +88,7 @@ run_update() {
   write_status "restarting" "$FROM" "$TO" "" "$STARTED"
   # 'up -d' aplica las imágenes nuevas. El backend va a morir mientras este
   # script (que corre en otro container) sigue vivo.
-  if ! (cd "$REPO" && docker compose -f "$COMPOSE_FILE" up -d backend frontend 2>&1); then
+  if ! (cd "$REPO" && docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d backend frontend 2>&1); then
     write_status "failed" "$FROM" "$TO" "compose up falló" "$STARTED"
     echo "[updater] FAIL compose up" >&2
     return 1
