@@ -43,7 +43,15 @@ type EnrollmentTokenResult struct {
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, databaseURL)
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	config.MaxConns = 4
+	config.MinConns = 0
+	config.MaxConnIdleTime = 30 * time.Second
+	config.MaxConnLifetime = 15 * time.Minute
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, err
 	}
