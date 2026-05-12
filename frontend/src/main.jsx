@@ -2430,23 +2430,33 @@ function ManagerUpdateButton({ api }) {
     );
   }
 
-  // Caso 2: hay update disponible → botón clickable.
+  // Construye etiqueta de versión actual reutilizable (caso 2 y 3).
+  const verLabel = version?.version && version.version !== 'unknown'
+    ? `${version.version}${version.current && version.current !== 'unknown' ? ` (${version.current})` : ''}`
+    : (version?.current && version.current !== 'unknown' ? version.current : 'manager');
+
+  // Caso 2: hay update disponible → mostrar versión actual + botón clickable.
   if (updateAvailable) {
+    const behindNum = typeof version?.behind === 'number' ? version.behind : null;
+    const behindLabel = behindNum !== null ? ` (${behindNum} commit${behindNum === 1 ? '' : 's'} atrás)` : '';
+    const title = `${version?.current || 'unknown'} → ${version?.latest || '?'}${behindLabel}`;
     return (
-      <button
-        className="logout manager-update"
-        onClick={trigger}
-        disabled={busy}
-        title={`${version.current} → ${version.latest} (${version.behind} commit${version.behind === 1 ? '' : 's'} atrás)`}
-      >
-        <Download size={18} />
-        ↓ Actualizar manager
-      </button>
+      <div className="manager-version-update">
+        <span className="manager-version-current" title="Versión actualmente corriendo">{verLabel}</span>
+        <button
+          className="logout manager-update"
+          onClick={trigger}
+          disabled={busy}
+          title={title}
+        >
+          <Download size={18} />
+          ↓ Actualizar manager
+        </button>
+      </div>
     );
   }
 
   // Caso 3: al día → solo mostrar versión actual, sin botón.
-  const verLabel = version?.version ? `${version.version}${version.current && version.current !== 'unknown' ? ` (${version.current})` : ''}` : 'manager';
   return (
     <div className="manager-version" title="Manager al día. Esta zona muestra el botón solo cuando hay update disponible.">
       {verLabel}

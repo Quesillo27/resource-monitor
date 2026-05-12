@@ -152,6 +152,19 @@ nav button.active {
   padding: 0 10px;
 }
 
+/* Cuando hay update: muestra versión actual + botón apilados. */
+.manager-version-update {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.manager-version-current {
+  color: var(--sidebar-muted);
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0 10px;
+}
+
 /* ── Main content ── */
 main {
   overflow: auto;

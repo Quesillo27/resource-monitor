@@ -806,6 +806,9 @@ func (s *Server) managerVersion(w http.ResponseWriter, r *http.Request) {
 			if v, ok := info["latest"].(string); ok {
 				out["latest"] = v
 			}
+			if v, ok := info["behind"]; ok {
+				out["behind"] = v
+			}
 			if v, ok := info["checked_at"]; ok {
 				out["checked_at"] = v
 			}
