@@ -91,16 +91,23 @@ func applyIntervalChange(cfg *config.Config, newInterval int) {
 
 func runMetricsLoop(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {
 	currentIntervalSeconds.Store(int32(cfg.IntervalSeconds))
+	nextTick := time.Now()
 	for {
 		sendWithRetry(ctx, cfg, buf)
 		interval := int(currentIntervalSeconds.Load())
 		if interval < config.MinIntervalSeconds {
 			interval = config.MinIntervalSeconds
 		}
+		nextTick = nextTick.Add(time.Duration(interval) * time.Second)
+		wait := time.Until(nextTick)
+		if wait < 0 {
+			nextTick = time.Now()
+			wait = 0
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(time.Duration(interval) * time.Second):
+		case <-time.After(wait):
 		}
 	}
 }
