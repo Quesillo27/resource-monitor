@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Gauge, RefreshCw, Server } from 'lucide-react';
 
 export const REFRESH_MS = 60_000;
 
@@ -69,6 +69,17 @@ export function humanMinutes(mins) {
   return h === 0 ? `${d}d` : `${d}d ${h}h`;
 }
 
+export function bytes(value) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let next = Number(value || 0);
+  let unit = 0;
+  while (next >= 1024 && unit < units.length - 1) {
+    next /= 1024;
+    unit += 1;
+  }
+  return `${next.toFixed(unit === 0 ? 0 : 2)} ${units[unit]}`;
+}
+
 export function copyTextFallback(text) {
   try {
     const ta = document.createElement('textarea');
@@ -131,6 +142,77 @@ export function RefreshMeta({ lastUpdated, loading, onRefresh }) {
 
 export function Skeleton() {
   return <div className="skeleton-wrap"><div className="skeleton" /><div className="skeleton" style={{ width: '70%' }} /><div className="skeleton" style={{ width: '85%' }} /></div>;
+}
+
+export function Kpi({ icon: Icon, label, value, tone = '' }) {
+  return <article className={`kpi ${tone}`}><Icon size={22} /><span>{label}</span><strong>{value}</strong></article>;
+}
+
+export function MetricTile({ label, value, hint, tone = '' }) {
+  return <article className={`metric-tile ${tone}`}><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>;
+}
+
+export function Ring({ label, value, main, total, color }) {
+  const safeValue = Math.max(0, Math.min(Number(value || 0), 100));
+  return (
+    <div className="ring-card">
+      <div className="ring" style={{ background: `conic-gradient(${color} ${safeValue * 3.6}deg, #d9dee6 0deg)` }}>
+        <span>{round(safeValue)}%</span>
+      </div>
+      <strong>{label}</strong>
+      <small>{main || '0 B'} / {total || '0 B'}</small>
+    </div>
+  );
+}
+
+export function ChartPanel({ title, subtitle, unit, children }) {
+  return (
+    <section className="panel chart-panel">
+      <div className="panel-head chart-head">
+        <div><h2>{title}</h2><span>{subtitle}</span></div>
+        <small>{unit}</small>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function Status({ status }) {
+  return <span className={`status ${status}`}>{status}</span>;
+}
+
+export function StatusDonut({ counts }) {
+  const online = Number(counts.online || 0);
+  const warning = Number(counts.warning || 0);
+  const critical = Number(counts.critical || 0);
+  const offline = Number(counts.offline || 0);
+  const onlineLike = online + warning + critical;
+  const total = onlineLike + offline || 1;
+  const pct = Math.round((onlineLike / total) * 100);
+  const tone = critical > 0 ? 'critical' : warning > 0 ? 'warning' : 'online';
+  return (
+    <div className={`status-donut tone-${tone}`}>
+      <Gauge size={36} />
+      <span>{pct}%</span>
+      <small>{onlineLike} de {total} online</small>
+    </div>
+  );
+}
+
+export function MiniAgentList({ agents, metric, empty = 'Sin datos' }) {
+  if (!agents.length) return <p className="empty-panel">{empty}</p>;
+  return <div className="mini-list">{agents.map((agent) => <div key={agent.id}><strong>{agent.name}</strong><span>{metric ? percent(agent[metric]) : date(agent.last_metric_at)}</span></div>)}</div>;
+}
+
+export function EmptyState({ icon: Icon = Server, title, subtitle }) {
+  const isStringIcon = typeof Icon === 'string';
+  return (
+    <div className="empty-state">
+      {isStringIcon ? <span style={{ fontSize: 40 }}>{Icon}</span> : <Icon size={40} strokeWidth={1.2} />}
+      <strong>{title}</strong>
+      {subtitle && <span>{subtitle}</span>}
+    </div>
+  );
 }
 
 export function Modal({ title, children, onClose }) {
