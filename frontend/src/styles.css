@@ -255,8 +255,9 @@ h2 {
 .kpi-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(148px, 1fr));
+  grid-template-columns: repeat(4, minmax(111px, 1fr));
   margin-bottom: 18px;
+  max-width: 75%;
 }
 
 .kpi-grid.compact {
@@ -318,6 +319,7 @@ button.kpi.clickable:hover {
   gap: 14px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 18px;
+  max-width: 75%;
 }
 .dash-hero-card {
   background: var(--panel);
@@ -373,7 +375,8 @@ button.kpi.clickable:hover {
 .dash-hero-card.tone-online   { border-left: 3px solid var(--green); }
 
 @media (max-width: 980px) {
-  .dash-hero-grid { grid-template-columns: 1fr; }
+  .dash-hero-grid { grid-template-columns: 1fr; max-width: 100%; }
+  .kpi-grid { max-width: 100%; }
 }
 
 /* ── Filterbar ── */
