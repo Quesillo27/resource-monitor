@@ -152,6 +152,16 @@ nav button.active {
   padding: 0 10px;
 }
 
+/* Fallback durante carga de vistas lazy (React.lazy + Suspense). */
+.lazy-fallback {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 14px;
+  justify-content: center;
+  min-height: 240px;
+}
+
 /* Cuando hay update: muestra versión actual + botón apilados. */
 .manager-version-update {
   display: flex;

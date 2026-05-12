@@ -13,6 +13,7 @@
     "vite": "latest",
     "react": "latest",
     "react-dom": "latest",
+    "preact": "latest",
     "lucide-react": "latest"
   },
   "devDependencies": {}
