@@ -31,9 +31,25 @@ import {
 } from 'lucide-react';
 import './styles.css';
 import './resources-polish.css';
+import {
+  AlertList,
+  Header,
+  IconButton,
+  Panel,
+  RefreshMeta,
+  Skeleton,
+  copyTextFallback,
+  date,
+  humanMinutes,
+  relativeTime,
+  timeAgo,
+  useLoad,
+} from './lib/ui';
 
-// Vista pesada en chunk separado: solo se descarga al entrar a "Alta de agente".
+// Vistas pesadas en chunks separados (React.lazy + Suspense).
 const Enrollment = lazy(() => import('./views/Enrollment'));
+const SettingsPage = lazy(() => import('./views/SettingsPage'));
+const AlertsCenter = lazy(() => import('./views/AlertsCenter'));
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 const REFRESH_MS       = 60_000; // overview + alertas
@@ -725,24 +741,6 @@ function pickTone(value, warn = 75, crit = 90) {
   return '';
 }
 
-function copyTextFallback(text) {
-  try {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.setAttribute('readonly', '');
-    ta.style.position = 'fixed';
-    ta.style.top = '-1000px';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    ta.setSelectionRange(0, text.length);
-    const ok = document.execCommand('copy');
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
 
 function CommandLine({ cmd, desc }) {
   const [state, setState] = useState('idle'); // 'idle' | 'ok' | 'err'
@@ -917,539 +915,11 @@ function ResourcesTab({ agent, history, historyLoading = false, disks: currentDi
 }
 
 
-function timeAgo(dateStr) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `hace ${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `hace ${hrs}h`;
-  return `hace ${Math.floor(hrs / 24)}d`;
-}
 
-function humanMinutes(mins) {
-  if (mins == null || isNaN(mins)) return '—';
-  const m = Number(mins);
-  if (m < 0) return '—';
-  if (m < 1) return `${Math.round(m * 60)}s`;
-  if (m < 60) return `${m.toFixed(1)} min`;
-  if (m < 1440) {
-    const h = Math.floor(m / 60);
-    const r = Math.round(m - h * 60);
-    return r === 0 ? `${h}h` : `${h}h ${r}min`;
-  }
-  const d = Math.floor(m / 1440);
-  const h = Math.floor((m - d * 1440) / 60);
-  return h === 0 ? `${d}d` : `${d}d ${h}h`;
-}
 
-function SettingsPage({ api }) {
-  const [tab, setTab] = useState('users');
-  return (
-    <section>
-      <Header title="Configuración" />
-      <div className="tab-row">
-        <button className={tab === 'users' ? 'selected' : ''} onClick={() => setTab('users')}>Usuarios</button>
-        <button className={tab === 'system' ? 'selected' : ''} onClick={() => setTab('system')}>Sistema</button>
-      </div>
-      {tab === 'users' && <UsersPanel api={api} />}
-      {tab === 'system' && <SystemPanel api={api} />}
-    </section>
-  );
-}
 
-function UsersPanel({ api }) {
-  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/users'), [], 0);
-  const [draft, setDraft] = useState({ username: '', password: '', role: 'operator', active: true });
-  const [editing, setEditing] = useState(null);
-  const [pwModal, setPwModal] = useState(null);
-  const [message, setMessage] = useState(null);
 
-  const users = data?.users || [];
-  const setField = (k, v) => setDraft((d) => ({ ...d, [k]: v }));
 
-  async function createUser() {
-    if (!draft.username.trim() || !draft.password.trim()) {
-      setMessage({ type: 'err', text: 'Usuario y contraseña son obligatorios' });
-      return;
-    }
-    if (draft.password.length < 8) {
-      setMessage({ type: 'err', text: 'La contraseña debe tener al menos 8 caracteres' });
-      return;
-    }
-    try {
-      await api.post('/api/users', draft);
-      setDraft({ username: '', password: '', role: 'operator', active: true });
-      setMessage({ type: 'ok', text: 'Usuario creado' });
-      reload();
-    } catch (e) {
-      setMessage({ type: 'err', text: e.message });
-    }
-  }
-
-  async function saveEdit() {
-    if (!editing) return;
-    try {
-      await api.patch(`/api/users/${editing.id}`, { username: editing.username, role: editing.role, active: editing.active });
-      setEditing(null);
-      setMessage({ type: 'ok', text: 'Usuario actualizado' });
-      reload();
-    } catch (e) {
-      setMessage({ type: 'err', text: e.message });
-    }
-  }
-
-  async function savePassword() {
-    if (!pwModal || !pwModal.password) return;
-    if (pwModal.password.length < 8) {
-      setMessage({ type: 'err', text: 'La contraseña debe tener al menos 8 caracteres' });
-      return;
-    }
-    try {
-      await api.post(`/api/users/${pwModal.id}/password`, { password: pwModal.password });
-      setPwModal(null);
-      setMessage({ type: 'ok', text: 'Contraseña actualizada' });
-    } catch (e) {
-      setMessage({ type: 'err', text: e.message });
-    }
-  }
-
-  async function removeUser(u) {
-    if (u.username === 'admin') return;
-    if (!window.confirm(`¿Eliminar al usuario "${u.username}"? Esta acción no se puede deshacer.`)) return;
-    try {
-      await api.delete(`/api/users/${u.id}`);
-      setMessage({ type: 'ok', text: `Usuario "${u.username}" eliminado` });
-      reload();
-    } catch (e) {
-      setMessage({ type: 'err', text: e.message });
-    }
-  }
-
-  return (
-    <Panel title="Usuarios y permisos" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
-      <p className="panel-hint">Roles: <strong>admin</strong> gestiona todo, <strong>operator</strong> opera reglas y agentes, <strong>viewer</strong> solo lectura.</p>
-
-      <div className="user-create">
-        <input placeholder="Usuario" value={draft.username} onChange={(e) => setField('username', e.target.value)} />
-        <input type="password" placeholder="Contraseña (≥ 8 caracteres)" value={draft.password} onChange={(e) => setField('password', e.target.value)} />
-        <select value={draft.role} onChange={(e) => setField('role', e.target.value)}>
-          <option value="admin">admin</option>
-          <option value="operator">operator</option>
-          <option value="viewer">viewer</option>
-        </select>
-        <label className="user-active-toggle"><input type="checkbox" checked={draft.active} onChange={(e) => setField('active', e.target.checked)} /> Activo</label>
-        <IconButton icon={Save} label="Crear usuario" onClick={createUser} />
-      </div>
-
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Usuario</th><th>Rol</th><th>Estado</th><th>Creado</th><th>Actualizado</th><th></th></tr></thead>
-          <tbody>
-            {users.map((u) => (
-              <tr key={u.id}>
-                <td><strong>{u.username}</strong></td>
-                <td><span className={`role-badge ${u.role}`}>{u.role}</span></td>
-                <td>{u.active ? <span className="status online">activo</span> : <span className="status offline">inactivo</span>}</td>
-                <td className="text-muted">{date(u.created_at)}</td>
-                <td className="text-muted">{date(u.updated_at)}</td>
-                <td>
-                  <div className="actions">
-                    <IconButton icon={Edit3} label="Editar" onClick={() => setEditing({ ...u })} />
-                    <IconButton icon={KeyRound} label="Cambiar contraseña" onClick={() => setPwModal({ id: u.id, username: u.username, password: '' })} />
-                    {u.username !== 'admin' && (
-                      <IconButton icon={Trash2} label="Eliminar" onClick={() => removeUser(u)} />
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {users.length === 0 && <tr><td colSpan="6" className="empty">Sin usuarios registrados</td></tr>}
-          </tbody>
-        </table>
-      </div>
-
-      {message && <p className={`status-msg ${message.type}`}>{message.text}</p>}
-
-      {editing && (
-        <Modal title={`Editar ${editing.username}`} onClose={() => setEditing(null)}>
-          <div className="form-grid">
-            <label>Usuario<input value={editing.username} onChange={(e) => setEditing({ ...editing, username: e.target.value })} /></label>
-            <label>Rol
-              <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}>
-                <option value="admin">admin</option>
-                <option value="operator">operator</option>
-                <option value="viewer">viewer</option>
-              </select>
-            </label>
-            <label className="user-active-toggle"><input type="checkbox" checked={editing.active} onChange={(e) => setEditing({ ...editing, active: e.target.checked })} /> Activo</label>
-          </div>
-          <div className="actions modal-actions">
-            <button onClick={() => setEditing(null)}>Cancelar</button>
-            <button className="primary" onClick={saveEdit}>Guardar</button>
-          </div>
-        </Modal>
-      )}
-
-      {pwModal && (
-        <Modal title={`Cambiar contraseña — ${pwModal.username}`} onClose={() => setPwModal(null)}>
-          <label>Nueva contraseña <span className="field-hint">mínimo 8 caracteres</span>
-            <input type="password" autoFocus value={pwModal.password} onChange={(e) => setPwModal({ ...pwModal, password: e.target.value })} />
-          </label>
-          <div className="actions modal-actions">
-            <button onClick={() => setPwModal(null)}>Cancelar</button>
-            <button className="primary" onClick={savePassword}>Actualizar</button>
-          </div>
-        </Modal>
-      )}
-    </Panel>
-  );
-}
-
-function SystemPanel({ api }) {
-  const { data: version } = useLoad(() => api.get('/api/agent/version').catch(() => ({})), [], 0);
-  return (
-    <Panel title="Información del sistema">
-      <div className="system-grid">
-        <div className="system-card">
-          <span className="system-label">Versión del agente</span>
-          <strong>{version?.version || 'desconocida'}</strong>
-          <small>Versión disponible para agentes nuevos</small>
-        </div>
-        <div className="system-card">
-          <span className="system-label">Canales de notificación</span>
-          <strong>SMTP y Telegram</strong>
-          <small>Configura desde la pestaña Alertas → SMTP / Telegram</small>
-        </div>
-        <div className="system-card">
-          <span className="system-label">Reglas de alertas</span>
-          <strong>Globales y por equipo</strong>
-          <small>Configura desde Alertas → Reglas (globales) o desde el detalle del equipo</small>
-        </div>
-      </div>
-    </Panel>
-  );
-}
-
-function Modal({ title, children, onClose }) {
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-        <header className="modal-head">
-          <h3>{title}</h3>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
-        </header>
-        <div className="modal-body">{children}</div>
-      </div>
-    </div>
-  );
-}
-
-function AlertsCenter({ api }) {
-  const [tab, setTab] = useState('alerts');
-  return (
-    <section>
-      <Header title="Alertas" />
-      <div className="tab-row">
-        <button className={tab === 'alerts' ? 'selected' : ''} onClick={() => setTab('alerts')}>Alertas activas</button>
-        <button className={tab === 'stats' ? 'selected' : ''} onClick={() => setTab('stats')}>Estadísticas</button>
-        <button className={tab === 'timeline' ? 'selected' : ''} onClick={() => setTab('timeline')}>Timeline</button>
-        <button className={tab === 'rules' ? 'selected' : ''} onClick={() => setTab('rules')}>Reglas</button>
-        <button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button>
-        <button className={tab === 'telegram' ? 'selected' : ''} onClick={() => setTab('telegram')}>Telegram</button>
-      </div>
-      {tab === 'alerts' && <Alerts api={api} />}
-      {tab === 'stats' && <AlertStats api={api} />}
-      {tab === 'timeline' && <AlertTimeline api={api} />}
-      {tab === 'rules' && <AlertRulesPanel api={api} />}
-      {tab === 'smtp' && <SMTPSettings api={api} />}
-      {tab === 'telegram' && <TelegramSettings api={api} />}
-    </section>
-  );
-}
-
-function AlertStats({ api }) {
-  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts/stats'), [], 0);
-  const rows = data?.stats || [];
-  return (
-    <Panel title="Estadísticas por agente" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
-      {rows.length === 0 ? (
-        <p className="empty-panel">Sin historial de alertas</p>
-      ) : (
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Agente</th>
-              <th>Alertas activas</th>
-              <th>Críticas (total)</th>
-              <th>Warnings (total)</th>
-              <th>Última alerta</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} style={row.active_count > 0 ? { background: 'rgba(220,38,38,0.08)', color: 'var(--red, #dc2626)' } : {}}>
-                <td>{row.agent_name}</td>
-                <td>{row.active_count}</td>
-                <td>{row.critical_total}</td>
-                <td>{row.warning_total}</td>
-                <td>{row.last_alert_at ? timeAgo(row.last_alert_at) : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </Panel>
-  );
-}
-
-function AlertTimeline({ api }) {
-  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts?active=false'), [], 0);
-  const alerts = (data?.alerts || []).slice(0, 50);
-  return (
-    <Panel title="Timeline de alertas" action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />}>
-      {alerts.length === 0 ? (
-        <p className="empty-panel">Sin historial de alertas</p>
-      ) : (
-        <div className="alert-list">
-          {alerts.map((alert) => {
-            let duration = null;
-            if (alert.resolved_at) {
-              const diffMs = new Date(alert.resolved_at).getTime() - new Date(alert.opened_at).getTime();
-              const diffMins = Math.floor(diffMs / 60000);
-              duration = diffMins < 60 ? `${diffMins}m` : `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
-            }
-            return (
-              <article className={`alert-card sev-${alert.severity}`} key={alert.id}>
-                <AlertTriangle size={18} style={{ color: alert.severity === 'critical' ? '#dc2626' : '#d97706' }} />
-                <div>
-                  <strong>{alert.agent_name} · {alert.metric || alert.message}</strong>
-                  <span>
-                    {timeAgo(alert.opened_at)}
-                    {duration && <> · Resuelta en {duration}</>}
-                    {alert.active && <> · <span className="sev-badge critical">ACTIVA</span></>}
-                  </span>
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </Panel>
-  );
-}
-
-function Alerts({ api }) {
-  const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/alerts'), [], REFRESH_MS);
-  const alerts = data?.alerts || [];
-  const unseenCount = alerts.filter((a) => !a.seen_at).length;
-  async function markAll() {
-    if (!unseenCount) return;
-    await api.post('/api/alerts/seen-all', {});
-    reload();
-  }
-  return (
-    <Panel
-      title={`Alertas activas${unseenCount ? ` · ${unseenCount} sin ver` : ''}`}
-      action={
-        <div className="actions">
-          {unseenCount > 0 && <IconButton icon={Eye} label="Marcar todas vistas" onClick={markAll} />}
-          <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} />
-        </div>
-      }
-    >
-      <AlertList alerts={alerts} api={api} onChange={reload} />
-    </Panel>
-  );
-}
-
-function SMTPSettings({ api }) {
-  const { data, reload } = useLoad(() => api.get('/api/alert-settings/smtp'), [], 0);
-  const [form, setForm] = useState(null);
-  const [message, setMessage] = useState('');
-  useEffect(() => { if (data && !form) setForm({ ...data, password: '' }); }, [data, form]);
-  if (!form) return <Skeleton />;
-  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
-  async function save() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    const saved = await api.put('/api/alert-settings/smtp', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
-    setForm({ ...saved, password: '' });
-    setMessage('Configuracion guardada');
-    reload();
-  }
-  async function test() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    await api.post('/api/alert-settings/smtp/test', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
-    setMessage('Correo de prueba enviado');
-  }
-  return (
-    <Panel title="Configuracion SMTP" action={<div className="actions"><IconButton icon={Send} label="Probar SMTP" onClick={test} /><IconButton icon={Mail} label="Guardar SMTP" onClick={save} /></div>}>
-      <div className="smtp-grid">
-        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar correos</span></label>
-        <label>Host<input value={form.host} onChange={(e) => set('host', e.target.value)} /></label>
-        <label>Puerto<input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} /></label>
-        <label>Usuario<input value={form.username} onChange={(e) => set('username', e.target.value)} /></label>
-        <label>Contrasena<input type="password" value={form.password} placeholder="Mantener actual si se deja vacia" onChange={(e) => set('password', e.target.value)} /></label>
-        <label>Remitente<input value={form.from_address} onChange={(e) => set('from_address', e.target.value)} /></label>
-        <label>Destinatarios<input value={form.to_addresses} onChange={(e) => set('to_addresses', e.target.value)} placeholder="ops@empresa.com,infra@empresa.com" /></label>
-        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
-        <label><span><input type="checkbox" checked={!!form.use_tls} onChange={(e) => set('use_tls', e.target.checked)} /> TLS directo</span></label>
-        <label><span><input type="checkbox" checked={!!form.use_starttls} onChange={(e) => set('use_starttls', e.target.checked)} /> STARTTLS</span></label>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-    </Panel>
-  );
-}
-
-function TelegramSettings({ api }) {
-  const { data, reload } = useLoad(() => api.get('/api/settings/telegram'), [], 0);
-  const [form, setForm] = useState(null);
-  const [message, setMessage] = useState('');
-  useEffect(() => { if (data && !form) setForm({ ...data, bot_token: '' }); }, [data, form]);
-  if (!form) return <Skeleton />;
-  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
-  async function save() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    const saved = await api.put('/api/settings/telegram', { ...form, cooldown_minutes: cooldown });
-    setForm({ ...saved, bot_token: '' });
-    setMessage('Configuracion guardada');
-    reload();
-  }
-  async function test() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    await api.post('/api/settings/telegram/test', { ...form, cooldown_minutes: cooldown });
-    setMessage('Mensaje de prueba enviado');
-  }
-  return (
-    <Panel title="Configuracion Telegram" action={<div className="actions"><IconButton icon={Send} label="Probar Telegram" onClick={test} /><IconButton icon={Bell} label="Guardar Telegram" onClick={save} /></div>}>
-      <div className="smtp-grid">
-        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar Telegram</span></label>
-        <label>Bot Token<input type="password" value={form.bot_token} placeholder="Mantener actual si se deja vacio" onChange={(e) => set('bot_token', e.target.value)} /></label>
-        <label>Chat IDs<input value={form.chat_ids} onChange={(e) => set('chat_ids', e.target.value)} placeholder="-100123456789,@canal" /></label>
-        <label>Modo parse
-          <select value={form.parse_mode || 'HTML'} onChange={(e) => set('parse_mode', e.target.value)}>
-            <option value="HTML">HTML</option>
-            <option value="Markdown">Markdown</option>
-            <option value="MarkdownV2">MarkdownV2</option>
-          </select>
-        </label>
-        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-    </Panel>
-  );
-}
-
-const METRIC_LABELS = { cpu: 'CPU', ram: 'RAM', disk_used_percent: 'Disco', network_recv_mbps: 'Red recv', network_sent_mbps: 'Red sent', agent_offline_minutes: 'Sin conexion' };
-const METRIC_UNITS = { cpu: '%', ram: '%', disk_used_percent: '%', network_recv_mbps: 'Mbps', network_sent_mbps: 'Mbps', agent_offline_minutes: 'min' };
-
-function AlertRulesPanel({ api }) {
-  const [rules, setRules] = useState(null);
-  const [smtpOk, setSmtpOk] = useState(false);
-  const [telegramOk, setTelegramOk] = useState(false);
-  const [message, setMessage] = useState('');
-
-  useEffect(() => {
-    let alive = true;
-    Promise.all([
-      api.get('/api/alert-rules/defaults'),
-      api.get('/api/alert-settings/smtp'),
-      api.get('/api/settings/telegram'),
-    ]).then(([rulesData, smtp, tg]) => {
-      if (!alive) return;
-      setRules(rulesData.rules || []);
-      setSmtpOk(!!(smtp.enabled && smtp.host));
-      setTelegramOk(!!(tg.enabled && tg.chat_ids));
-    }).catch(console.error);
-    return () => { alive = false; };
-  }, []);
-
-  if (!rules) return <Skeleton />;
-
-  const setRule = (idx, key, value) =>
-    setRules((prev) => prev.map((r, i) => i === idx ? { ...r, [key]: value } : r));
-
-  async function save() {
-    const validated = rules.map((r) => ({
-      ...r,
-      threshold: parseFloat(r.threshold) || 0,
-      duration_samples: Math.max(1, parseInt(r.duration_samples, 10) || 2),
-      cooldown_minutes: Math.max(1, parseInt(r.cooldown_minutes, 10) || 30),
-    }));
-    try {
-      const saved = await api.put('/api/alert-rules/defaults', { rules: validated });
-      setRules(saved.rules || []);
-      setMessage('Reglas guardadas');
-    } catch (e) {
-      setMessage('Error: ' + e.message);
-    }
-  }
-
-  return (
-    <Panel title="Reglas globales de alerta" action={<IconButton icon={Save} label="Guardar reglas" onClick={save} />}>
-      {!smtpOk && <p className="warn-inline">SMTP no habilitado — activa SMTP en la pestaña SMTP para usar notificaciones por email</p>}
-      {!telegramOk && <p className="warn-inline">Telegram no habilitado — configura Telegram en la pestaña Telegram para usar notificaciones por Telegram</p>}
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Metrica</th>
-              <th>Severidad</th>
-              <th>Umbral</th>
-              <th>Muestras</th>
-              <th>Cooldown (min)</th>
-              <th>Activa</th>
-              <th>Email</th>
-              <th>Telegram</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rules.map((rule, i) => (
-              <tr key={`${rule.metric}-${rule.resource_key}-${rule.severity}`}>
-                <td>{METRIC_LABELS[rule.metric] || rule.metric}{rule.resource_key ? ` (${rule.resource_key})` : ''}</td>
-                <td><span className={`sev-badge ${rule.severity}`}>{rule.severity}</span></td>
-                <td>
-                  <input type="number" min="0" step="any" value={rule.threshold}
-                    onChange={(e) => setRule(i, 'threshold', e.target.value)} style={{ width: '70px' }} />
-                  <small style={{ marginLeft: '4px', color: 'var(--muted, #64748b)' }}>{METRIC_UNITS[rule.metric] || ''}</small>
-                </td>
-                <td>
-                  <input type="number" min="1" max="20" value={rule.duration_samples}
-                    onChange={(e) => setRule(i, 'duration_samples', e.target.value)} style={{ width: '55px' }} />
-                </td>
-                <td>
-                  <input type="number" min="1" value={rule.cooldown_minutes}
-                    onChange={(e) => setRule(i, 'cooldown_minutes', e.target.value)} style={{ width: '65px' }} />
-                </td>
-                <td><input type="checkbox" checked={!!rule.enabled} onChange={(e) => setRule(i, 'enabled', e.target.checked)} /></td>
-                <td>
-                  <input type="checkbox" checked={!!rule.notify_email}
-                    disabled={!smtpOk}
-                    title={smtpOk ? '' : 'Configura y activa SMTP primero'}
-                    onChange={(e) => setRule(i, 'notify_email', e.target.checked)} />
-                </td>
-                <td>
-                  <input type="checkbox" checked={!!rule.notify_telegram}
-                    disabled={!telegramOk}
-                    title={telegramOk ? '' : 'Configura y activa Telegram primero'}
-                    onChange={(e) => setRule(i, 'notify_telegram', e.target.checked)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-    </Panel>
-  );
-}
-
-function Header({ title, meta }) {
-  return <header className="page-header"><div><h1>{title}</h1></div>{meta}</header>;
-}
-
-function Panel({ title, action, children }) {
-  return <section className="panel"><div className="panel-head"><h2>{title}</h2>{action}</div>{children}</section>;
-}
 
 function Kpi({ icon: Icon, label, value, tone = '' }) {
   return <article className={`kpi ${tone}`}><Icon size={22} /><span>{label}</span><strong>{value}</strong></article>;
@@ -1745,70 +1215,6 @@ function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
   );
 }
 
-function AlertList({ alerts, compact = false, api = null, onChange = null }) {
-  const [channels, setChannels] = useState({ smtpOk: false, telegramOk: false });
-  useEffect(() => {
-    if (!api) return;
-    let cancelled = false;
-    Promise.all([
-      api.get('/api/settings/smtp').catch(() => ({})),
-      api.get('/api/settings/telegram').catch(() => ({})),
-    ]).then(([smtp, tg]) => {
-      if (cancelled) return;
-      setChannels({
-        smtpOk: !!(smtp && smtp.enabled && smtp.host),
-        telegramOk: !!(tg && tg.enabled && tg.chat_ids),
-      });
-    });
-    return () => { cancelled = true; };
-  }, [api]);
-  if (!alerts.length) return <p className="empty-panel">Sin alertas activas ✓</p>;
-  async function markSeen(id) {
-    if (!api) return;
-    await api.post(`/api/alerts/${id}/seen`, {});
-    onChange && onChange();
-  }
-  const fmt = (v, u) => {
-    if (v == null) return '—';
-    const unit = (u || '').trim();
-    if (unit === 'min') return humanMinutes(v);
-    return `${Number(v).toFixed(1)}${unit}`;
-  };
-  return (
-    <div className={`alert-list ${compact ? 'compact' : ''}`}>
-      {alerts.map((alert) => (
-        <article className={`alert-card sev-${alert.severity} ${alert.seen_at ? 'is-seen' : ''}`} key={alert.id}>
-          <AlertTriangle size={18} />
-          <div className="alert-body">
-            <div className="alert-headline">
-              <span className={`sev-badge ${alert.severity}`}>{alert.severity}</span>
-              <strong>{alert.agent_name}</strong>
-              {alert.resource_key && <span className="alert-resource">{alert.resource_key}</span>}
-              {!alert.active && <span className="sev-badge resolved">resuelta</span>}
-              {alert.seen_at && <span className="sev-badge seen">vista</span>}
-            </div>
-            <p className="alert-message">{alert.message}</p>
-            {(alert.observed_value != null || alert.threshold_value != null) && (
-              <div className="alert-values">
-                <span>Valor: <strong>{fmt(alert.observed_value, alert.unit)}</strong></span>
-                <span>Umbral: <strong>{fmt(alert.threshold_value, alert.unit)}</strong></span>
-                {alert.duration_samples > 0 && <span>Muestras: <strong>{alert.duration_samples}</strong></span>}
-              </div>
-            )}
-            <div className="alert-meta">
-              <span>{timeAgo(alert.opened_at)}</span>
-              {alert.notify_email && channels.smtpOk && <span title="Notifica por email">· ✉ email</span>}
-              {alert.notify_telegram && channels.telegramOk && <span title="Notifica por telegram">· ✈ telegram</span>}
-              {api && !alert.seen_at && (
-                <button className="link-btn" onClick={() => markSeen(alert.id)}>Marcar vista</button>
-              )}
-            </div>
-          </div>
-        </article>
-      ))}
-    </div>
-  );
-}
 
 function DisksTable({ disks }) {
   return <DataTable empty="Sin muestras de disco" columns={['Unidad / Disco', 'Mount', 'FS', 'Total', 'Usado', 'Libre', 'Uso']} rows={disks.map((d) => [diskLabel(d), d.mountpoint, d.filesystem, bytes(d.total_bytes), bytes(d.used_bytes), bytes(d.free_bytes), <Usage value={d.used_percent} />])} />;
@@ -2099,17 +1505,7 @@ function WizardStep({ index, title, children }) {
 
 
 
-function IconButton({ icon: Icon, label, onClick }) {
-  return <button className="icon-button" title={label} aria-label={label} onClick={onClick}><Icon size={18} /></button>;
-}
 
-function RefreshMeta({ lastUpdated, loading, onRefresh }) {
-  return <div className="refresh-meta"><span>{loading ? 'Actualizando...' : `Actualizado ${relativeTime(lastUpdated)}`}</span><IconButton icon={RefreshCw} onClick={onRefresh} label="Actualizar" /></div>;
-}
-
-function Skeleton() {
-  return <div className="skeleton-wrap"><div className="skeleton" /><div className="skeleton" style={{ width: '70%' }} /><div className="skeleton" style={{ width: '85%' }} /></div>;
-}
 
 function EmptyState({ icon: Icon = Server, title, subtitle }) {
   return (
@@ -2121,28 +1517,6 @@ function EmptyState({ icon: Icon = Server, title, subtitle }) {
   );
 }
 
-function useLoad(loader, deps, refreshMs = 0) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [version, setVersion] = useState(0);
-  const [lastUpdated, setLastUpdated] = useState(null);
-  useEffect(() => {
-    let alive = true;
-    const load = () => {
-      setLoading(true);
-      loader().then((next) => {
-        if (alive) {
-          setData(next);
-          setLastUpdated(new Date());
-        }
-      }).catch((err) => console.error(err)).finally(() => alive && setLoading(false));
-    };
-    load();
-    const timer = refreshMs ? setInterval(load, refreshMs) : null;
-    return () => { alive = false; if (timer) clearInterval(timer); };
-  }, [...deps, version]);
-  return { data, loading, lastUpdated, reload: () => setVersion((v) => v + 1) };
-}
 
 function ManagerUpdateButton({ api }) {
   const [status, setStatus] = useState({ state: 'idle' });
@@ -2292,18 +1666,7 @@ function percent(value) {
   return `${round(value)}%`;
 }
 
-function date(value) {
-  if (!value) return 'n/a';
-  return new Date(value).toLocaleString();
-}
 
-function relativeTime(value) {
-  if (!value) return 'pendiente';
-  const seconds = Math.max(0, Math.round((Date.now() - value.getTime()) / 1000));
-  if (seconds < 5) return 'ahora';
-  if (seconds < 60) return `hace ${seconds}s`;
-  return `hace ${Math.round(seconds / 60)}m`;
-}
 
 function bytes(value) {
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
