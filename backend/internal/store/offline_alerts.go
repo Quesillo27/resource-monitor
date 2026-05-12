@@ -114,7 +114,7 @@ func (s *Store) evaluateAgentOfflineAlert(ctx context.Context, agentID, agentNam
 		return err
 	}
 	if count >= rule.DurationSamples {
-		message := fmt.Sprintf("%s %.1f%s supero umbral %.1f%s durante %d muestras", value.Label, value.Value, value.Unit, rule.Threshold, value.Unit, count)
+		message := fmt.Sprintf("%s %s supero umbral %s durante %d muestras", value.Label, humanizeMinutes(value.Value), humanizeMinutes(rule.Threshold), count)
 		if agentName != "" {
 			message = agentName + ": " + message
 		}
@@ -131,6 +131,33 @@ func (s *Store) evaluateAgentOfflineAlert(ctx context.Context, agentID, agentNam
 func resolveAlertType(ctx context.Context, tx pgx.Tx, agentID, alertType string) error {
 	_, err := tx.Exec(ctx, "UPDATE alerts SET active = false, resolved_at = COALESCE(resolved_at, now()) WHERE agent_id = $1 AND type = $2 AND active = true", agentID, alertType)
 	return err
+}
+
+func humanizeMinutes(mins float64) string {
+	if mins < 0 {
+		mins = 0
+	}
+	if mins < 1 {
+		secs := int(mins * 60)
+		return fmt.Sprintf("%ds", secs)
+	}
+	if mins < 60 {
+		return fmt.Sprintf("%.1f min", mins)
+	}
+	if mins < 1440 {
+		h := int(mins) / 60
+		m := int(mins) - h*60
+		if m == 0 {
+			return fmt.Sprintf("%dh", h)
+		}
+		return fmt.Sprintf("%dh %dmin", h, m)
+	}
+	d := int(mins) / 1440
+	h := (int(mins) - d*1440) / 60
+	if h == 0 {
+		return fmt.Sprintf("%dd", d)
+	}
+	return fmt.Sprintf("%dd %dh", d, h)
 }
 
 func OfflineStatusZero(agent *models.Agent) {

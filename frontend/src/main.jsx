@@ -1025,6 +1025,22 @@ function timeAgo(dateStr) {
   return `hace ${Math.floor(hrs / 24)}d`;
 }
 
+function humanMinutes(mins) {
+  if (mins == null || isNaN(mins)) return '—';
+  const m = Number(mins);
+  if (m < 0) return '—';
+  if (m < 1) return `${Math.round(m * 60)}s`;
+  if (m < 60) return `${m.toFixed(1)} min`;
+  if (m < 1440) {
+    const h = Math.floor(m / 60);
+    const r = Math.round(m - h * 60);
+    return r === 0 ? `${h}h` : `${h}h ${r}min`;
+  }
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m - d * 1440) / 60);
+  return h === 0 ? `${d}d` : `${d}d ${h}h`;
+}
+
 function SettingsPage({ api }) {
   const [tab, setTab] = useState('users');
   return (
@@ -1797,13 +1813,34 @@ function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
 }
 
 function AlertList({ alerts, compact = false, api = null, onChange = null }) {
+  const [channels, setChannels] = useState({ smtpOk: false, telegramOk: false });
+  useEffect(() => {
+    if (!api) return;
+    let cancelled = false;
+    Promise.all([
+      api.get('/api/settings/smtp').catch(() => ({})),
+      api.get('/api/settings/telegram').catch(() => ({})),
+    ]).then(([smtp, tg]) => {
+      if (cancelled) return;
+      setChannels({
+        smtpOk: !!(smtp && smtp.enabled && smtp.host),
+        telegramOk: !!(tg && tg.enabled && tg.chat_ids),
+      });
+    });
+    return () => { cancelled = true; };
+  }, [api]);
   if (!alerts.length) return <p className="empty-panel">Sin alertas activas ✓</p>;
   async function markSeen(id) {
     if (!api) return;
     await api.post(`/api/alerts/${id}/seen`, {});
     onChange && onChange();
   }
-  const fmt = (v, u) => v == null ? '—' : `${Number(v).toFixed(1)}${(u || '').trim()}`;
+  const fmt = (v, u) => {
+    if (v == null) return '—';
+    const unit = (u || '').trim();
+    if (unit === 'min') return humanMinutes(v);
+    return `${Number(v).toFixed(1)}${unit}`;
+  };
   return (
     <div className={`alert-list ${compact ? 'compact' : ''}`}>
       {alerts.map((alert) => (
@@ -1827,8 +1864,8 @@ function AlertList({ alerts, compact = false, api = null, onChange = null }) {
             )}
             <div className="alert-meta">
               <span>{timeAgo(alert.opened_at)}</span>
-              {alert.notify_email && <span title="Notifica por email">· ✉ email</span>}
-              {alert.notify_telegram && <span title="Notifica por telegram">· ✈ telegram</span>}
+              {alert.notify_email && channels.smtpOk && <span title="Notifica por email">· ✉ email</span>}
+              {alert.notify_telegram && channels.telegramOk && <span title="Notifica por telegram">· ✈ telegram</span>}
               {api && !alert.seen_at && (
                 <button className="link-btn" onClick={() => markSeen(alert.id)}>Marcar vista</button>
               )}
