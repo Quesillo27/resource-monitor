@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Bell,
   CheckCircle2,
+  Clock,
   Copy,
   Cpu,
   Download,
@@ -557,7 +558,7 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
   );
 }
 
-function AgentIntervalControl({ api, agentId, initialSeconds }) {
+function AgentIntervalControl({ api, agentId, initialSeconds, compact = false }) {
   const [seconds, setSeconds] = useState(initialSeconds || 60);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -570,13 +571,26 @@ function AgentIntervalControl({ api, agentId, initialSeconds }) {
     try {
       await api.put(`/api/agents/${agentId}/interval`, { seconds: value });
       setSeconds(value);
-      setMsg(`Intervalo actualizado a ${value}s. El agente lo aplicará en el próximo heartbeat.`);
-      setTimeout(() => setMsg(''), 4000);
+      setMsg(`Intervalo: ${value}s — se aplica en el próximo heartbeat`);
+      setTimeout(() => setMsg(''), 3500);
     } catch (e) {
       setMsg('Error: ' + e.message);
     } finally {
       setSaving(false);
     }
+  }
+  if (compact) {
+    return (
+      <span className="interval-pill" title="Intervalo de muestreo del agente">
+        <Clock size={14} />
+        <select value={seconds} disabled={saving} onChange={(e) => change(e.target.value)} aria-label="Intervalo de muestreo">
+          <option value={15}>15s</option>
+          <option value={30}>30s</option>
+          <option value={60}>60s</option>
+        </select>
+        {msg && <span className="interval-pill-msg">{msg}</span>}
+      </span>
+    );
   }
   return (
     <div className="agent-interval-control">
@@ -641,12 +655,11 @@ function AgentDetail({ api, agentId, onBack }) {
   }
   return (
     <section>
-      <Header title={agent?.name || 'Equipo'} meta={<div className="actions"><button onClick={onBack} disabled={deleting}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" disabled={deleting} /><IconButton icon={Trash2} onClick={deleteAgent} label={deleting ? 'Eliminando…' : 'Eliminar'} disabled={deleting} /><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} /></div>} />
+      <Header title={agent?.name || 'Equipo'} meta={<div className="actions">{agent && <AgentIntervalControl api={api} agentId={agentId} initialSeconds={data.interval_seconds || 60} compact />}<button onClick={onBack} disabled={deleting}>Volver</button><IconButton icon={Edit3} onClick={renameAgent} label="Renombrar" disabled={deleting} /><IconButton icon={Trash2} onClick={deleteAgent} label={deleting ? 'Eliminando…' : 'Eliminar'} disabled={deleting} /><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload} /></div>} />
       {agent && (
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span>{agent.primary_ip && <span>{agent.primary_ip}</span>}</div>
           <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
-          <AgentIntervalControl api={api} agentId={agentId} initialSeconds={data.interval_seconds || 60} />
           <div className="tab-row">
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>

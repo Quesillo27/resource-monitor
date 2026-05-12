@@ -1879,6 +1879,11 @@ label span {
 .toggle-switch input[type="checkbox"]:checked::before { transform: translateX(16px); }
 .toggle-switch input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.interval-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; font-size: 13px; color: var(--text-secondary); position: relative; }
+.interval-pill select { background: transparent; border: 0; padding: 2px 4px; font-size: 13px; color: var(--text-primary); cursor: pointer; outline: none; }
+.interval-pill select:focus { color: var(--blue); }
+.interval-pill-msg { position: absolute; top: calc(100% + 4px); right: 0; white-space: nowrap; font-size: 11px; color: var(--text-secondary); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; box-shadow: var(--shadow-sm); z-index: 5; }
+
 .agent-interval-control { display: flex; align-items: center; gap: 14px; margin: 10px 0 16px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
 .agent-interval-control label { display: inline-flex; align-items: center; gap: 8px; }
 .agent-interval-control select { padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); }
