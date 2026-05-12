@@ -68,8 +68,9 @@ func (c *Client) Register(ctx context.Context, token string, host collector.Host
 // al agente en respuesta al heartbeat. Usar Heartbeat() (sin response) para
 // llamadas que no necesitan procesarlos.
 type HeartbeatResponse struct {
-	Status   string         `json:"status"`
-	Commands []AgentCommand `json:"commands,omitempty"`
+	Status          string         `json:"status"`
+	Commands        []AgentCommand `json:"commands,omitempty"`
+	IntervalSeconds int            `json:"interval_seconds,omitempty"`
 }
 
 type AgentCommand struct {

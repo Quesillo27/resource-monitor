@@ -9,6 +9,7 @@ import (
 	"errors"
 	"log"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"resource-monitor/agent/internal/buffer"
@@ -18,6 +19,11 @@ import (
 	"resource-monitor/agent/internal/updater"
 	"resource-monitor/agent/internal/version"
 )
+
+// currentIntervalSeconds permite que sendOnce actualice el intervalo de
+// muestreo en vivo cuando el manager lo cambia (response del heartbeat).
+// runMetricsLoop lo lee al final de cada vuelta.
+var currentIntervalSeconds atomic.Int32
 
 // Run ejecuta el loop principal del agente hasta que ctx se cancele.
 // Lanza tres rutinas paralelas: métricas, inventario, chequeo de updates.
@@ -60,16 +66,41 @@ func newClient(cfg config.Config) *client.Client {
 	return client.NewWithTLS(cfg.ServerURL, cfg.Credential, cfg.InsecureSkipTLS)
 }
 
-func runMetricsLoop(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {
-	ticker := time.NewTicker(time.Duration(cfg.IntervalSeconds) * time.Second)
-	defer ticker.Stop()
+// applyIntervalChange aplica un nuevo intervalo dictado por el manager en el
+// response del heartbeat. Actualiza el ticker en vivo y persiste el cambio a
+// disco para que el próximo arranque arranque ya con el valor correcto.
+func applyIntervalChange(cfg *config.Config, newInterval int) {
+	if newInterval < config.MinIntervalSeconds {
+		newInterval = config.MinIntervalSeconds
+	}
+	prev := int(currentIntervalSeconds.Load())
+	if prev == newInterval {
+		return
+	}
+	currentIntervalSeconds.Store(int32(newInterval))
+	log.Printf("interval updated by server: %ds -> %ds", prev, newInterval)
+	if cfg.IntervalSeconds != newInterval {
+		cfg.IntervalSeconds = newInterval
+		if cfg.ConfigPath != "" {
+			if err := config.Save(cfg.ConfigPath, *cfg); err != nil {
+				log.Printf("interval persist failed: %v", err)
+			}
+		}
+	}
+}
 
+func runMetricsLoop(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {
+	currentIntervalSeconds.Store(int32(cfg.IntervalSeconds))
 	for {
 		sendWithRetry(ctx, cfg, buf)
+		interval := int(currentIntervalSeconds.Load())
+		if interval < config.MinIntervalSeconds {
+			interval = config.MinIntervalSeconds
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(time.Duration(interval) * time.Second):
 		}
 	}
 }
@@ -183,6 +214,9 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	}
 	if resp != nil && len(resp.Commands) > 0 {
 		go processCommands(cfg, resp.Commands)
+	}
+	if resp != nil && resp.IntervalSeconds > 0 {
+		applyIntervalChange(&cfg, resp.IntervalSeconds)
 	}
 	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {

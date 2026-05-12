@@ -52,13 +52,17 @@ func (s *Store) evaluateRuleAlerts(ctx context.Context, tx pgx.Tx, agentID strin
 }
 
 func (s *Store) effectiveAlertRules(ctx context.Context, tx pgx.Tx, agentID string) ([]models.AlertRule, error) {
+	var customEnabled bool
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(custom_rules_enabled, false) FROM agents WHERE id = $1`, agentID).Scan(&customEnabled); err != nil {
+		customEnabled = false
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,
 		       duration_samples, notify_email, notify_telegram, cooldown_minutes, description
 		FROM alert_rules
-		WHERE agent_id IS NULL OR agent_id = $1
+		WHERE agent_id IS NULL OR ($2 AND agent_id = $1)
 		ORDER BY agent_id NULLS FIRST, metric, resource_key, severity
-	`, agentID)
+	`, agentID, customEnabled)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -191,7 +192,53 @@ func (s *Store) ResetAgentAlertRules(ctx context.Context, agentID string) error 
 	if _, err := tx.Exec(ctx, "DELETE FROM alert_rules WHERE agent_id = $1", agentID); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(ctx, "UPDATE agents SET custom_rules_enabled = false WHERE id = $1", agentID); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
+}
+
+func (s *Store) GetAgentCustomRulesEnabled(ctx context.Context, agentID string) (bool, error) {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return false, err
+	}
+	var enabled bool
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(custom_rules_enabled, false) FROM agents WHERE id = $1`, agentID).Scan(&enabled)
+	return enabled, err
+}
+
+func (s *Store) SetAgentCustomRulesEnabled(ctx context.Context, agentID string, enabled bool) error {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET custom_rules_enabled = $2 WHERE id = $1`, agentID, enabled)
+	return err
+}
+
+func (s *Store) GetAgentIntervalSeconds(ctx context.Context, agentID string) (int, error) {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return 0, err
+	}
+	var seconds int
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(interval_seconds, 60) FROM agents WHERE id = $1`, agentID).Scan(&seconds)
+	if err != nil {
+		return 0, err
+	}
+	if seconds <= 0 {
+		seconds = 60
+	}
+	return seconds, nil
+}
+
+func (s *Store) SetAgentIntervalSeconds(ctx context.Context, agentID string, seconds int) error {
+	if seconds != 15 && seconds != 30 && seconds != 60 {
+		return fmt.Errorf("interval must be 15, 30 or 60 seconds")
+	}
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET interval_seconds = $2 WHERE id = $1`, agentID, seconds)
+	return err
 }
 
 func (s *Store) listAlertRules(ctx context.Context, agentID string) ([]models.AlertRule, error) {

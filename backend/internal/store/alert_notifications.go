@@ -35,6 +35,9 @@ func (s *Store) AgentDetailNotifications(ctx context.Context, id string, offline
 		return nil, err
 	}
 	detail["alerts"] = alerts
+	if interval, err := s.GetAgentIntervalSeconds(ctx, id); err == nil {
+		detail["interval_seconds"] = interval
+	}
 	return detail, nil
 }
 

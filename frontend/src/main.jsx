@@ -557,6 +557,42 @@ function AgentTags({ api, agentId, initialTags, onUpdate }) {
   );
 }
 
+function AgentIntervalControl({ api, agentId, initialSeconds }) {
+  const [seconds, setSeconds] = useState(initialSeconds || 60);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  useEffect(() => { setSeconds(initialSeconds || 60); }, [initialSeconds]);
+  async function change(next) {
+    const value = parseInt(next, 10);
+    if (![15, 30, 60].includes(value)) return;
+    setSaving(true);
+    setMsg('');
+    try {
+      await api.put(`/api/agents/${agentId}/interval`, { seconds: value });
+      setSeconds(value);
+      setMsg(`Intervalo actualizado a ${value}s. El agente lo aplicará en el próximo heartbeat.`);
+      setTimeout(() => setMsg(''), 4000);
+    } catch (e) {
+      setMsg('Error: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="agent-interval-control">
+      <label>
+        <strong>Intervalo de muestreo:</strong>
+        <select value={seconds} disabled={saving} onChange={(e) => change(e.target.value)}>
+          <option value={15}>15 segundos</option>
+          <option value={30}>30 segundos</option>
+          <option value={60}>60 segundos</option>
+        </select>
+      </label>
+      {msg && <span className="interval-msg">{msg}</span>}
+    </div>
+  );
+}
+
 function AgentDetail({ api, agentId, onBack }) {
   const [tab, setTab] = useState('summary');
   const [range, setRange] = useState('1h');
@@ -610,6 +646,7 @@ function AgentDetail({ api, agentId, onBack }) {
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span>{agent.primary_ip && <span>{agent.primary_ip}</span>}</div>
           <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
+          <AgentIntervalControl api={api} agentId={agentId} initialSeconds={data.interval_seconds || 60} />
           <div className="tab-row">
             {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
           </div>
@@ -887,8 +924,8 @@ function Enrollment({ api }) {
       return;
     }
     const intervalNum = Number(interval);
-    if (!intervalNum || intervalNum < 30 || intervalNum > 3600) {
-      setError('El intervalo debe estar entre 30 y 3600 segundos');
+    if (![15, 30, 60].includes(intervalNum)) {
+      setError('El intervalo debe ser 15, 30 o 60 segundos');
       return;
     }
     setLoading(true);
@@ -947,7 +984,11 @@ function Enrollment({ api }) {
                     </select>
                   </label>
                   <label>Intervalo (segundos)
-                    <input type="number" min="30" max="3600" value={interval} onChange={(e) => setIntervalValue(e.target.value)} />
+                    <select value={interval} onChange={(e) => setIntervalValue(Number(e.target.value))}>
+                      <option value={15}>15 segundos</option>
+                      <option value={30}>30 segundos</option>
+                      <option value={60}>60 segundos (recomendado)</option>
+                    </select>
                   </label>
                 </div>
                 <label>Servicios críticos a monitorear <span className="field-hint">separados por coma</span>
@@ -1621,6 +1662,7 @@ const RULE_GROUPS = [
 
 function AgentRulesTab({ api, agentId }) {
   const [rules, setRules] = useState(null);
+  const [customEnabled, setCustomEnabled] = useState(false);
   const [smtpOk, setSmtpOk] = useState(false);
   const [telegramOk, setTelegramOk] = useState(false);
   const [message, setMessage] = useState(null);
@@ -1635,11 +1677,26 @@ function AgentRulesTab({ api, agentId }) {
     ]).then(([rulesData, smtp, tg]) => {
       if (!alive) return;
       setRules(rulesData.rules || []);
+      setCustomEnabled(!!rulesData.custom_rules_enabled);
       setSmtpOk(!!(smtp.enabled && smtp.host));
       setTelegramOk(!!(tg.enabled && tg.chat_ids));
     }).catch((e) => alive && setMessage({ type: 'err', text: 'Error cargando reglas: ' + e.message }));
     return () => { alive = false; };
   };
+
+  async function toggleCustom(next) {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await api.put(`/api/agents/${agentId}/custom-rules-enabled`, { enabled: next });
+      setCustomEnabled(next);
+      setMessage({ type: 'ok', text: next ? 'Reglas personalizadas activadas. Editá los umbrales que quieras y guardá.' : 'Reglas personalizadas desactivadas. El equipo usa las reglas globales.' });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error: ' + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(loadAll, [agentId]);
 
@@ -1693,19 +1750,36 @@ function AgentRulesTab({ api, agentId }) {
       title="Reglas de alertas"
       action={
         <div className="actions">
-          <IconButton icon={RefreshCw} label="Restaurar" onClick={reset} disabled={saving} />
-          <IconButton icon={Save} label={saving ? 'Guardando…' : 'Guardar reglas'} onClick={save} disabled={saving} />
+          <label className="toggle-switch" title="Activar reglas personalizadas para este equipo">
+            <input type="checkbox" checked={customEnabled} disabled={saving} onChange={(e) => toggleCustom(e.target.checked)} />
+            <span>Reglas personalizadas</span>
+          </label>
+          {customEnabled && <IconButton icon={RefreshCw} label="Restaurar" onClick={reset} disabled={saving} />}
+          {customEnabled && <IconButton icon={Save} label={saving ? 'Guardando…' : 'Guardar reglas'} onClick={save} disabled={saving} />}
         </div>
       }
     >
-      <p className="panel-hint">
-        Personaliza umbrales y notificaciones para este equipo. Las reglas que no modifiques heredan los valores globales.
-        {overrideCount > 0 && <> · <strong>{overrideCount}</strong> regla{overrideCount !== 1 ? 's' : ''} personalizada{overrideCount !== 1 ? 's' : ''}.</>}
-      </p>
+      {message && <p className={`form-msg ${message.type}`}>{message.text}</p>}
 
-      {!smtpOk && <p className="warn-inline">SMTP no configurado — actívalo en pestaña SMTP para usar notificaciones por email</p>}
-      {!telegramOk && <p className="warn-inline">Telegram no configurado — actívalo en pestaña Telegram para usar notificaciones</p>}
+      {!customEnabled && (
+        <p className="panel-hint">
+          Este equipo está usando las <strong>reglas globales</strong>. Activá el toggle de arriba para personalizar umbrales y notificaciones solo para este equipo.
+        </p>
+      )}
 
+      {customEnabled && (
+        <>
+          <p className="panel-hint">
+            Personaliza umbrales y notificaciones para este equipo. Las reglas que no modifiques heredan los valores globales.
+            {overrideCount > 0 && <> · <strong>{overrideCount}</strong> regla{overrideCount !== 1 ? 's' : ''} personalizada{overrideCount !== 1 ? 's' : ''}.</>}
+          </p>
+
+          {!smtpOk && <p className="warn-inline">SMTP no configurado — actívalo en pestaña SMTP para usar notificaciones por email</p>}
+          {!telegramOk && <p className="warn-inline">Telegram no configurado — actívalo en pestaña Telegram para usar notificaciones</p>}
+        </>
+      )}
+
+      {customEnabled && (<>
       <div className="rules-grid">
         {RULE_GROUPS.map((group) => {
           const groupRules = rules.filter((r) => r.metric === group.metric).sort((a, b) => a.severity === 'critical' ? 1 : -1);
@@ -1771,8 +1845,7 @@ function AgentRulesTab({ api, agentId }) {
         <div><strong>Cooldown</strong><span>Minutos mínimos entre re-notificaciones del mismo canal.</span></div>
         <div><strong>Source</strong><span>Reglas con badge "agent" están personalizadas para este equipo.</span></div>
       </footer>
-
-      {message && <p className={`status-msg ${message.type}`}>{message.text}</p>}
+      </>)}
     </Panel>
   );
 }

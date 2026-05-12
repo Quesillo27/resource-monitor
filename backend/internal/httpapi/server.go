@@ -87,6 +87,8 @@ func (s *Server) Routes() http.Handler {
 
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/alert-rules", s.saveAgentAlertRules)
 			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/custom-rules-enabled", s.setAgentCustomRulesEnabled)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/interval", s.setAgentInterval)
 			r.With(s.requireRole("admin", "operator")).Patch("/agents/{id}", s.updateAgent)
 			r.With(s.requireRole("admin", "operator")).Delete("/agents/{id}", s.deleteAgent)
 			r.With(s.requireRole("admin", "operator")).Post("/enrollment-tokens", s.createEnrollmentToken)
@@ -394,7 +396,8 @@ func (s *Server) saveDefaultAlertRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) agentAlertRules(w http.ResponseWriter, r *http.Request) {
-	rules, err := s.store.ListAgentAlertRules(r.Context(), chi.URLParam(r, "id"))
+	agentID := chi.URLParam(r, "id")
+	rules, err := s.store.ListAgentAlertRules(r.Context(), agentID)
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return
@@ -403,7 +406,46 @@ func (s *Server) agentAlertRules(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "agent rules failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rules": rules})
+	customEnabled, _ := s.store.GetAgentCustomRulesEnabled(r.Context(), agentID)
+	writeJSON(w, http.StatusOK, map[string]any{"rules": rules, "custom_rules_enabled": customEnabled})
+}
+
+func (s *Server) setAgentCustomRulesEnabled(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	if err := s.store.SetAgentCustomRulesEnabled(r.Context(), agentID, req.Enabled); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "toggle failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"custom_rules_enabled": req.Enabled})
+}
+
+func (s *Server) setAgentInterval(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Seconds int `json:"seconds"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	if err := s.store.SetAgentIntervalSeconds(r.Context(), agentID, req.Seconds); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"interval_seconds": req.Seconds})
 }
 
 func (s *Server) saveAgentAlertRules(w http.ResponseWriter, r *http.Request) {
@@ -620,9 +662,11 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		_ = s.store.UpdateAgentVersion(r.Context(), agentID, req.AgentVersion)
 	}
 	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
+	intervalSeconds, _ := s.store.GetAgentIntervalSeconds(r.Context(), agentID)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "ok",
-		"commands": commands,
+		"status":           "ok",
+		"commands":         commands,
+		"interval_seconds": intervalSeconds,
 	})
 }
 
