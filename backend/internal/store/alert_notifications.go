@@ -13,9 +13,22 @@ func (s *Store) ensureAlertNotificationSchema(ctx context.Context) error {
 	}
 	statements := []string{
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ",
-		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_by_user_id UUID REFERENCES users(id)",
+		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS seen_by_username TEXT",
 		"CREATE INDEX IF NOT EXISTS alerts_seen_idx ON alerts(seen_at, opened_at DESC)",
+		`DO $$
+		BEGIN
+			IF EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conname = 'alerts_seen_by_user_id_fkey'
+				  AND confdeltype <> 'n'
+			) THEN
+				ALTER TABLE alerts DROP CONSTRAINT alerts_seen_by_user_id_fkey;
+				ALTER TABLE alerts
+					ADD CONSTRAINT alerts_seen_by_user_id_fkey
+					FOREIGN KEY (seen_by_user_id) REFERENCES users(id) ON DELETE SET NULL;
+			END IF;
+		END $$;`,
 	}
 	for _, statement := range statements {
 		if _, err := s.pool.Exec(ctx, statement); err != nil {
