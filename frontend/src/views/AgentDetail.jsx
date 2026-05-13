@@ -7,6 +7,8 @@ import {
   Copy,
   Cpu,
   Edit3,
+  Eye,
+  EyeOff,
   Gauge,
   HardDrive,
   MemoryStick,
@@ -454,6 +456,118 @@ function DisksTable({ disks }) {
 
 function NetworkTable({ networks }) {
   return <DataTable empty="Sin muestras de red" columns={['Interfaz', 'Estado', 'Recibido', 'Enviado']} rows={networks.map((n) => [n.name, <span className={`net-state ${n.up ? 'up' : 'down'}`}>{n.up ? '● up' : '○ down'}</span>, bytes(n.bytes_recv), bytes(n.bytes_sent)])} />;
+}
+
+function NetworkTab({ api, agentId, fallbackNetworks }) {
+  const [networks, setNetworks] = useState(null);
+  const [includeHidden, setIncludeHidden] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const load = async () => {
+    try {
+      const data = await api.get(`/api/agents/${agentId}/networks?include_inactive=${includeHidden}`);
+      setNetworks(Array.isArray(data?.networks) ? data.networks : []);
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error cargando interfaces: ' + e.message });
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [agentId, includeHidden]);
+
+  async function reconcile() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const result = await api.post(`/api/agents/${agentId}/networks/reconcile`, {});
+      await load();
+      setMessage({ type: 'ok', text: `Validado: ${result.active ?? 0} activas, ${result.hidden ?? 0} ocultas.` });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error al validar: ' + e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function hide(name) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.put(`/api/agents/${agentId}/networks/hide`, { name });
+      await load();
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error al ocultar: ' + e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function restore(name) {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await api.put(`/api/agents/${agentId}/networks/restore`, { name });
+      await load();
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error al restaurar: ' + e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (networks === null && fallbackNetworks) {
+    // primer render: mostrar fallback de la pagina padre mientras cargamos
+    return (
+      <div className="network-tab">
+        <div className="network-toolbar">
+          <span>Cargando interfaces…</span>
+        </div>
+        <NetworkTable networks={fallbackNetworks} />
+      </div>
+    );
+  }
+
+  const list = networks || [];
+
+  return (
+    <div className="network-tab">
+      <div className="network-toolbar">
+        <div className="network-toolbar-info">
+          <strong>Interfaces de red</strong>
+          <span>{list.length} {list.length === 1 ? 'interfaz' : 'interfaces'}{includeHidden ? ' (incluyendo ocultas)' : ' activas'}</span>
+        </div>
+        <div className="network-toolbar-actions">
+          <label className="toggle-inline">
+            <input type="checkbox" checked={includeHidden} disabled={busy} onChange={(e) => setIncludeHidden(e.target.checked)} />
+            <span>Mostrar ocultas</span>
+          </label>
+          <button type="button" className="btn-secondary" onClick={reconcile} disabled={busy}>
+            <RefreshCw size={14} /> {busy ? 'Validando…' : 'Validar interfaces'}
+          </button>
+        </div>
+      </div>
+      {message && <p className={`form-msg ${message.type}`}>{message.text}</p>}
+      <DataTable
+        empty="Sin interfaces para mostrar"
+        columns={['Interfaz', 'Estado', 'Recibido', 'Enviado', 'Visibilidad']}
+        rows={list.map((n) => [
+          n.name,
+          <span className={`net-state ${n.up ? 'up' : 'down'}`}>{n.up ? '● up' : '○ down'}</span>,
+          bytes(n.bytes_recv),
+          bytes(n.bytes_sent),
+          n.hidden ? (
+            <button type="button" className="icon-btn" title="Restaurar interfaz" disabled={busy} onClick={() => restore(n.name)}>
+              <Eye size={14} /> Restaurar
+            </button>
+          ) : (
+            <button type="button" className="icon-btn danger" title="Ocultar interfaz" disabled={busy} onClick={() => hide(n.name)}>
+              <EyeOff size={14} /> Ocultar
+            </button>
+          ),
+        ])}
+      />
+    </div>
+  );
 }
 
 function ProcessesTable({ processes, isOffline = false, lastSeenAt = null }) {
@@ -1101,7 +1215,7 @@ export default function AgentDetail({ api, agentId, onBack }) {
           {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} history={historyData} />}
           {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'disks' && <DisksTable disks={disks} />}
-          {tab === 'network' && <NetworkTable networks={networks} />}
+          {tab === 'network' && <NetworkTab api={api} agentId={agentId} fallbackNetworks={networks} />}
           {tab === 'processes' && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'services' && <ServicesTable services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}

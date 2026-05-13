@@ -16,6 +16,9 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 	if err := s.ensureAlertRuntimeSchemas(ctx); err != nil {
 		return err
 	}
+	if err := s.ensureNetworkInterfaceSchema(ctx); err != nil {
+		return err
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -53,6 +56,9 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 		if err != nil {
 			return err
 		}
+	}
+	if err := trackAgentNetworksTx(ctx, tx, agentID, req.Networks); err != nil {
+		return err
 	}
 	for _, proc := range req.Processes {
 		_, err = tx.Exec(ctx, `

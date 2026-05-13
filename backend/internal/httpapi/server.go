@@ -77,6 +77,8 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/agents/{id}/history", s.agentHistory)
 			r.Get("/agents/{id}/networks", s.agentNetworks)
 			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/networks/reconcile", s.reconcileAgentNetworks)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/networks/hide", s.hideAgentNetwork)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/networks/restore", s.restoreAgentNetwork)
 			r.Get("/agents/{id}/status", s.agentStatus)
 			r.Get("/agents/{id}/alert-rules", s.agentAlertRules)
 			r.Get("/alerts", s.listAlerts)
@@ -255,6 +257,50 @@ func (s *Server) reconcileAgentNetworks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) hideAgentNetwork(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := s.store.HideAgentNetwork(r.Context(), chi.URLParam(r, "id"), req.Name); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "hide network failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (s *Server) restoreAgentNetwork(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if err := s.store.RestoreAgentNetwork(r.Context(), chi.URLParam(r, "id"), req.Name); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "restore network failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request) {
