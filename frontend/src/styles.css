@@ -1499,6 +1499,18 @@ label span {
 .rules-disk-key strong { font-size: 13px; color: var(--text-primary); font-weight: 600; }
 .usage-pill { display: inline-block; min-width: 56px; padding: 3px 8px; background: #eff6ff; color: #1d4ed8; border-radius: 999px; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
 
+.rules-disk-table .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--text-secondary); cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.rules-disk-table .icon-btn:hover { background: #f8fafc; }
+.rules-disk-table .icon-btn.danger:hover { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+.rules-disk-table .icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.rules-disk-add td { background: #f8fafc; }
+.rules-disk-add-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+.rules-disk-add-row select { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; background: #fff; min-width: 200px; }
+.rules-disk-add-row .btn-primary { padding: 6px 14px; border: 0; border-radius: 6px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; transition: background .15s; }
+.rules-disk-add-row .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+.rules-disk-add-row .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .rules-help { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
 .rules-help div { padding: 10px 12px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; }
 .rules-help strong { display: block; font-size: 12px; color: var(--text-primary); margin-bottom: 3px; }

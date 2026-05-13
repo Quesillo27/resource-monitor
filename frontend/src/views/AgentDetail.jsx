@@ -561,13 +561,14 @@ function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
   );
 }
 
-function AgentRulesTab({ api, agentId }) {
+function AgentRulesTab({ api, agentId, disks }) {
   const [rules, setRules] = useState(null);
   const [customEnabled, setCustomEnabled] = useState(false);
   const [smtpOk, setSmtpOk] = useState(false);
   const [telegramOk, setTelegramOk] = useState(false);
   const [message, setMessage] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [newDiskMount, setNewDiskMount] = useState('');
 
   const loadAll = () => {
     let alive = true;
@@ -646,6 +647,59 @@ function AgentRulesTab({ api, agentId }) {
   const diskKeys = [...new Set(diskRules.map((r) => r.resource_key))];
   const overrideCount = rules.filter((r) => r.source === 'agent').length;
 
+  const availableMounts = (disks || [])
+    .map((d) => (d.mountpoint || d.name || '').trim())
+    .filter((m) => m && !diskKeys.includes(m));
+  const uniqueAvailableMounts = [...new Set(availableMounts)];
+
+  function addDiskRule(mountpoint) {
+    const key = (mountpoint || '').trim();
+    if (!key) return;
+    const defaultWarn = diskRules.find((r) => r.resource_key === '' && r.severity === 'warning');
+    const defaultCrit = diskRules.find((r) => r.resource_key === '' && r.severity === 'critical');
+    const fresh = [
+      {
+        id: `new:${key}:warning`,
+        agent_id: agentId,
+        metric: 'disk_used_percent',
+        resource_key: key,
+        severity: 'warning',
+        enabled: true,
+        threshold: defaultWarn?.threshold ?? 70,
+        duration_samples: defaultWarn?.duration_samples ?? 2,
+        notify_email: defaultWarn?.notify_email ?? false,
+        notify_telegram: defaultWarn?.notify_telegram ?? false,
+        cooldown_minutes: defaultWarn?.cooldown_minutes ?? 30,
+        description: `Disco ${key} sobre umbral warning`,
+        source: 'agent',
+      },
+      {
+        id: `new:${key}:critical`,
+        agent_id: agentId,
+        metric: 'disk_used_percent',
+        resource_key: key,
+        severity: 'critical',
+        enabled: true,
+        threshold: defaultCrit?.threshold ?? 90,
+        duration_samples: defaultCrit?.duration_samples ?? 2,
+        notify_email: defaultCrit?.notify_email ?? true,
+        notify_telegram: defaultCrit?.notify_telegram ?? false,
+        cooldown_minutes: defaultCrit?.cooldown_minutes ?? 30,
+        description: `Disco ${key} sobre umbral critical`,
+        source: 'agent',
+      },
+    ];
+    setRules((prev) => [...prev, ...fresh]);
+    setNewDiskMount('');
+    setMessage({ type: 'ok', text: `Regla para ${key} agregada. Recordá guardar para persistirla.` });
+  }
+
+  function removeDiskRule(key) {
+    if (!key) return;
+    setRules((prev) => prev.filter((r) => !(r.metric === 'disk_used_percent' && r.resource_key === key)));
+    setMessage({ type: 'ok', text: `Regla de ${key} eliminada. Recordá guardar para persistir.` });
+  }
+
   return (
     <Panel
       title="Reglas de alertas"
@@ -711,6 +765,7 @@ function AgentRulesTab({ api, agentId }) {
                   <th>Activa</th>
                   <th>Email</th>
                   <th>Telegram</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -732,9 +787,30 @@ function AgentRulesTab({ api, agentId }) {
                       </td>
                       <td><input type="checkbox" checked={!!crit?.notify_email} disabled={!smtpOk || !crit} title={smtpOk ? 'Notificar critical por email' : 'Configura SMTP primero'} onChange={(e) => crit && setRule(crit.id, 'notify_email', e.target.checked)} /></td>
                       <td><input type="checkbox" checked={!!crit?.notify_telegram} disabled={!telegramOk || !crit} title={telegramOk ? 'Notificar critical por telegram' : 'Configura Telegram primero'} onChange={(e) => crit && setRule(crit.id, 'notify_telegram', e.target.checked)} /></td>
+                      <td>
+                        {key !== '' && (
+                          <button type="button" className="icon-btn danger" title={`Eliminar regla de ${key}`} onClick={() => removeDiskRule(key)} disabled={saving}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
+                {uniqueAvailableMounts.length > 0 && (
+                  <tr className="rules-disk-add">
+                    <td colSpan={8}>
+                      <div className="rules-disk-add-row">
+                        <span>Agregar regla para una unidad / mount:</span>
+                        <select value={newDiskMount} onChange={(e) => setNewDiskMount(e.target.value)} disabled={saving}>
+                          <option value="">Elegí un mount…</option>
+                          {uniqueAvailableMounts.map((m) => (<option key={m} value={m}>{m}</option>))}
+                        </select>
+                        <button type="button" className="btn-primary" disabled={!newDiskMount || saving} onClick={() => addDiskRule(newDiskMount)}>Agregar</button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -972,7 +1048,7 @@ export default function AgentDetail({ api, agentId, onBack }) {
           {tab === 'processes' && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
           {tab === 'services' && <ServicesTable services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
-          {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} />}
+          {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} disks={disks} />}
           {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} onRefresh={reloadInventory} />}
           {tab === 'software' && <SoftwareTab software={inventory?.software} onRefresh={reloadInventory} />}
         </>
