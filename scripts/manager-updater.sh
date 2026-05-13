@@ -174,20 +174,37 @@ run_update() {
   return 0
 }
 
-# Hace 'git fetch' (no muta el working tree) y compara HEAD local vs remoto,
-# escribe version-info.json para que la UI sepa si hay update disponible.
-# Incluye "version" semántica del manager derivada de git tags (manager-v*).
+# Hace 'git fetch' (no muta el working tree) y escribe version-info.json.
+# Compara: SHA del binario corriendo (MANAGER_BUILD_SHA del container backend)
+# vs HEAD del repo local. Si difieren, hay update aplicable rebuildeando con
+# el codigo local. Esto cubre dos escenarios:
+#   (a) flujo normal: alguien hizo git push, manager-updater hara fetch+pull
+#       y eventualmente el HEAD local quedara adelante del binario.
+#   (b) operador edito el repo directo en el host: HEAD local ya adelantado,
+#       el binario sigue corriendo el SHA viejo. El sistema lo detecta igual.
 update_version_info() {
   cd "$REPO" || return 0
   git fetch --quiet origin 2>/dev/null || true
-  CURRENT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
-  LATEST="$(git rev-parse --short origin/main 2>/dev/null || git rev-parse --short origin/master 2>/dev/null || echo unknown)"
+  # Trae cambios remotos al working tree si el host no los movio. ff-only para
+  # no pisar cambios locales sin commitear. Falla silenciosa esta bien.
+  git pull --ff-only --quiet 2>/dev/null || true
+  HEAD_SHA="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  # SHA del binario corriendo en el container backend (env MANAGER_BUILD_SHA).
+  # Si no se puede inspeccionar, fallback a "unknown" -> update_available=true.
+  BACKEND_BUILD_SHA="$(docker inspect "${PROJECT_NAME}-backend-1" \
+    --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+    | grep '^MANAGER_BUILD_SHA=' | head -1 | cut -d= -f2- | tr -d '\r' || echo unknown)"
+  if [ -z "$BACKEND_BUILD_SHA" ]; then
+    BACKEND_BUILD_SHA="unknown"
+  fi
   BEHIND="$(git rev-list --count HEAD..origin/main 2>/dev/null || git rev-list --count HEAD..origin/master 2>/dev/null || echo 0)"
   VERSION="$(git describe --tags --abbrev=0 --match 'manager-v*' 2>/dev/null | sed 's/^manager-//' || echo v0.0.0)"
   AVAILABLE="false"
-  [ "$CURRENT" != "$LATEST" ] && [ "$LATEST" != "unknown" ] && AVAILABLE="true"
+  if [ "$BACKEND_BUILD_SHA" != "$HEAD_SHA" ] && [ "$HEAD_SHA" != "unknown" ]; then
+    AVAILABLE="true"
+  fi
   cat > "$VERSION_INFO.tmp" <<EOF
-{"version":"$VERSION","current":"$CURRENT","latest":"$LATEST","behind":$BEHIND,"update_available":$AVAILABLE,"checked_at":"$(now)"}
+{"version":"$VERSION","current":"$BACKEND_BUILD_SHA","latest":"$HEAD_SHA","behind":$BEHIND,"update_available":$AVAILABLE,"checked_at":"$(now)"}
 EOF
   mv -f "$VERSION_INFO.tmp" "$VERSION_INFO"
   chmod 666 "$VERSION_INFO" 2>/dev/null || true
