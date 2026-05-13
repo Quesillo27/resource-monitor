@@ -1,11 +1,11 @@
 name: Release
 
+# Desactivado para evitar ejecuciones fallidas y notificaciones en cada push/tag.
+# El flujo operativo actual compila y sirve binarios desde el manager LAN
+# mediante el servicio agent-assets en docker-compose.yml.
+# Si se necesita probar/publicar un release externo en GitHub, ejecutarlo
+# manualmente desde la pestaña Actions.
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:
