@@ -27,14 +27,15 @@ import (
 )
 
 type Host struct {
-	Name           string `json:"name"`
-	Hostname       string `json:"hostname"`
-	OS             string `json:"os"`
-	Arch           string `json:"arch"`
-	UptimeSeconds  uint64 `json:"uptime_seconds"`
-	AgentUptimeSec uint64 `json:"agent_uptime_seconds,omitempty"`
-	AgentVersion   string `json:"agent_version,omitempty"`
-	PrimaryIP      string `json:"primary_ip,omitempty"`
+	Name              string   `json:"name"`
+	Hostname          string   `json:"hostname"`
+	OS                string   `json:"os"`
+	Arch              string   `json:"arch"`
+	UptimeSeconds     uint64   `json:"uptime_seconds"`
+	AgentUptimeSec    uint64   `json:"agent_uptime_seconds,omitempty"`
+	AgentVersion      string   `json:"agent_version,omitempty"`
+	PrimaryIP         string   `json:"primary_ip,omitempty"`
+	LocalServiceNames []string `json:"local_service_names,omitempty"`
 }
 
 type Metrics struct {

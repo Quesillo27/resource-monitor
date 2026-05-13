@@ -80,6 +80,7 @@ func (s *Store) ensureRuntimeSchema(ctx context.Context) error {
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS primary_ip TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS custom_rules_enabled BOOLEAN NOT NULL DEFAULT false",
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS interval_seconds INTEGER NOT NULL DEFAULT 60",
+		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS service_checks TEXT[] NOT NULL DEFAULT '{}'",
 		`CREATE TABLE IF NOT EXISTS agent_commands (
 			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

@@ -241,6 +241,41 @@ func (s *Store) SetAgentIntervalSeconds(ctx context.Context, agentID string, sec
 	return err
 }
 
+func (s *Store) GetAgentServiceChecks(ctx context.Context, agentID string) ([]string, error) {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return nil, err
+	}
+	var checks []string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(service_checks, '{}') FROM agents WHERE id = $1`, agentID).Scan(&checks)
+	if err != nil {
+		return nil, err
+	}
+	if checks == nil {
+		checks = []string{}
+	}
+	return checks, nil
+}
+
+func (s *Store) SetAgentServiceChecks(ctx context.Context, agentID string, names []string) ([]string, error) {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return nil, err
+	}
+	cleaned := make([]string, 0, len(names))
+	seen := map[string]bool{}
+	for _, name := range names {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		cleaned = append(cleaned, trimmed)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE agents SET service_checks = $2 WHERE id = $1`, agentID, cleaned); err != nil {
+		return nil, err
+	}
+	return cleaned, nil
+}
+
 func (s *Store) listAlertRules(ctx context.Context, agentID string) ([]models.AlertRule, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,

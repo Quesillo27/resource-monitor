@@ -585,7 +585,108 @@ function ProcessesTable({ processes, isOffline = false, lastSeenAt = null }) {
 }
 
 function ServicesTable({ services }) {
-  return <DataTable empty="Sin servicios configurados" columns={['Servicio', 'Estado']} rows={services.map((s) => [s.name, <span className={`svc-state ${s.status === 'running' ? 'ok' : 'err'}`}>{s.status}</span>])} />;
+  return <DataTable empty="Sin servicios reportados aún" columns={['Servicio', 'Estado']} rows={services.map((s) => [s.name, <span className={`svc-state ${s.status === 'running' ? 'ok' : 'err'}`}>{s.status}</span>])} />;
+}
+
+function ServicesTab({ api, agentId, services }) {
+  const [configured, setConfigured] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  const load = async () => {
+    try {
+      const data = await api.get(`/api/agents/${agentId}/services-config`);
+      setConfigured(Array.isArray(data?.services) ? data.services : []);
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error cargando configuración: ' + e.message });
+    }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [agentId]);
+
+  async function addService() {
+    const name = draft.trim();
+    if (!name) return;
+    if (configured?.includes(name)) {
+      setMessage({ type: 'err', text: `${name} ya está en la lista` });
+      return;
+    }
+    setSaving(true);
+    setMessage(null);
+    try {
+      const next = [...(configured || []), name];
+      const data = await api.put(`/api/agents/${agentId}/services-config`, { services: next });
+      setConfigured(data.services || next);
+      setDraft('');
+      setMessage({ type: 'ok', text: `${name} agregado. El agente lo aplicará en el próximo heartbeat.` });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error: ' + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeService(name) {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const next = (configured || []).filter((n) => n !== name);
+      const data = await api.put(`/api/agents/${agentId}/services-config`, { services: next });
+      setConfigured(data.services || next);
+      setMessage({ type: 'ok', text: `${name} eliminado.` });
+    } catch (e) {
+      setMessage({ type: 'err', text: 'Error: ' + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (configured === null) return <Skeleton />;
+
+  const statusByName = new Map(services.map((s) => [s.name, s.status]));
+  const reportedExtras = services.filter((s) => !configured.includes(s.name)).map((s) => s.name);
+
+  return (
+    <div className="services-tab">
+      <Panel title="Servicios monitoreados" action={
+        <div className="services-add-inline">
+          <input
+            type="text"
+            placeholder="Nombre del servicio (ej. nginx, postgres, MSSQLSERVER)"
+            value={draft}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addService(); } }}
+          />
+          <button type="button" className="btn-primary" disabled={!draft.trim() || saving} onClick={addService}>Agregar</button>
+        </div>
+      }>
+        {message && <p className={`form-msg ${message.type}`}>{message.text}</p>}
+        {configured.length === 0 ? (
+          <p className="panel-hint">No hay servicios configurados. Agregá los que querés monitorear (ej. <code>nginx</code>, <code>postgres</code>, <code>MSSQLSERVER</code>) — el agente los buscará y reportará su estado en cada ciclo.</p>
+        ) : (
+          <DataTable
+            empty=""
+            columns={['Servicio', 'Estado', 'Acciones']}
+            rows={configured.map((name) => {
+              const status = statusByName.get(name);
+              return [
+                <strong>{name}</strong>,
+                status ? <span className={`svc-state ${status === 'running' ? 'ok' : 'err'}`}>{status}</span> : <span className="svc-state pending">esperando reporte</span>,
+                <button type="button" className="icon-btn danger" disabled={saving} title={`Quitar ${name}`} onClick={() => removeService(name)}>
+                  <Trash2 size={14} /> Quitar
+                </button>,
+              ];
+            })}
+          />
+        )}
+        {reportedExtras.length > 0 && (
+          <p className="panel-hint">El agente también reportó: {reportedExtras.join(', ')} (no configurados).</p>
+        )}
+      </Panel>
+    </div>
+  );
 }
 
 function HardwareTab({ hardware, onRefresh }) {
@@ -1217,7 +1318,7 @@ export default function AgentDetail({ api, agentId, onBack }) {
           {tab === 'disks' && <DisksTable disks={disks} />}
           {tab === 'network' && <NetworkTab api={api} agentId={agentId} fallbackNetworks={networks} />}
           {tab === 'processes' && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
-          {tab === 'services' && <ServicesTable services={services} />}
+          {tab === 'services' && <ServicesTab api={api} agentId={agentId} services={services} />}
           {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
           {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} disks={disks} />}
           {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} onRefresh={reloadInventory} />}

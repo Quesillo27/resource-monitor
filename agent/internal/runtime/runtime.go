@@ -89,6 +89,39 @@ func applyIntervalChange(cfg *config.Config, newInterval int) {
 	}
 }
 
+// applyServiceChecksChange aplica la lista de servicios dictada por el manager
+// en el response del heartbeat. La lista del server gana sobre la local; se
+// persiste a disco para sobrevivir restarts. Si las dos coinciden (mismo orden
+// y nombres), no hace nada.
+func applyServiceChecksChange(cfg *config.Config, fresh []string) {
+	if fresh == nil {
+		return
+	}
+	if equalStrings(cfg.ServiceChecks, fresh) {
+		return
+	}
+	prevCount := len(cfg.ServiceChecks)
+	cfg.ServiceChecks = append([]string(nil), fresh...)
+	log.Printf("service_checks updated by server: %d -> %d entries", prevCount, len(fresh))
+	if cfg.ConfigPath != "" {
+		if err := config.Save(cfg.ConfigPath, *cfg); err != nil {
+			log.Printf("service_checks persist failed: %v", err)
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func runMetricsLoop(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {
 	currentIntervalSeconds.Store(int32(cfg.IntervalSeconds))
 	nextTick := time.Now()
@@ -214,6 +247,7 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 		info.Name = cfg.Name
 	}
 	info.AgentVersion = version.Version
+	info.LocalServiceNames = append([]string(nil), cfg.ServiceChecks...)
 	api := newClient(cfg)
 	resp, err := api.HeartbeatWithCommands(ctx, info)
 	if err != nil {
@@ -224,6 +258,9 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	}
 	if resp != nil && resp.IntervalSeconds > 0 {
 		applyIntervalChange(&cfg, resp.IntervalSeconds)
+	}
+	if resp != nil && resp.ServiceChecks != nil {
+		applyServiceChecksChange(&cfg, resp.ServiceChecks)
 	}
 	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {

@@ -71,6 +71,7 @@ type HeartbeatResponse struct {
 	Status          string         `json:"status"`
 	Commands        []AgentCommand `json:"commands,omitempty"`
 	IntervalSeconds int            `json:"interval_seconds,omitempty"`
+	ServiceChecks   []string       `json:"service_checks"`
 }
 
 type AgentCommand struct {

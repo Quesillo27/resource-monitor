@@ -91,6 +91,8 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/custom-rules-enabled", s.setAgentCustomRulesEnabled)
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/interval", s.setAgentInterval)
+			r.Get("/agents/{id}/services-config", s.getAgentServices)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/services-config", s.setAgentServices)
 			r.With(s.requireRole("admin", "operator")).Patch("/agents/{id}", s.updateAgent)
 			r.With(s.requireRole("admin", "operator")).Delete("/agents/{id}", s.deleteAgent)
 			r.With(s.requireRole("admin", "operator")).Post("/enrollment-tokens", s.createEnrollmentToken)
@@ -257,6 +259,38 @@ func (s *Server) reconcileAgentNetworks(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) getAgentServices(w http.ResponseWriter, r *http.Request) {
+	checks, err := s.store.GetAgentServiceChecks(r.Context(), chi.URLParam(r, "id"))
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "get services failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"services": checks})
+}
+
+func (s *Server) setAgentServices(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Services []string `json:"services"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	cleaned, err := s.store.SetAgentServiceChecks(r.Context(), chi.URLParam(r, "id"), req.Services)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "save services failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"services": cleaned})
 }
 
 func (s *Server) hideAgentNetwork(w http.ResponseWriter, r *http.Request) {
@@ -709,10 +743,20 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
 	intervalSeconds, _ := s.store.GetAgentIntervalSeconds(r.Context(), agentID)
+	serviceChecks, _ := s.store.GetAgentServiceChecks(r.Context(), agentID)
+	// Si la DB no tiene servicios configurados pero el agente reporta los
+	// suyos locales (instalo con --services), hacer seed para que aparezcan
+	// en la UI y puedan editarse despues.
+	if len(serviceChecks) == 0 && len(req.LocalServiceNames) > 0 {
+		if cleaned, err := s.store.SetAgentServiceChecks(r.Context(), agentID, req.LocalServiceNames); err == nil {
+			serviceChecks = cleaned
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":           "ok",
 		"commands":         commands,
 		"interval_seconds": intervalSeconds,
+		"service_checks":   serviceChecks,
 	})
 }
 
