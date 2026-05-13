@@ -27,8 +27,11 @@ type claims struct {
 func (s *Server) issueJWT(user *store.User) (string, error) {
 	now := time.Now()
 	role, err := s.store.UserRole(context.Background(), user.ID)
-	if err != nil || role == "" {
-		role = "admin"
+	if err != nil {
+		return "", err
+	}
+	if role == "" {
+		role = "viewer"
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{
 		UserID:   user.ID,

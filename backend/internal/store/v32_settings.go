@@ -56,11 +56,14 @@ func (s *Store) AuthenticateUserV32(ctx context.Context, username, password stri
 	var user User
 	var active bool
 	err := s.pool.QueryRow(ctx, "SELECT id::text, username, password_hash, active FROM users WHERE username = $1", username).Scan(&user.ID, &user.Username, &user.PasswordHash, &active)
-	if err == pgx.ErrNoRows || !active {
+	if err == pgx.ErrNoRows {
 		return nil, ErrUnauthorized
 	}
 	if err != nil {
 		return nil, err
+	}
+	if !active {
+		return nil, ErrUnauthorized
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return nil, ErrUnauthorized
@@ -143,6 +146,26 @@ func (s *Store) UpdateUser(ctx context.Context, id string, req models.UserUpdate
 	if req.Active != nil {
 		active = *req.Active
 	}
+	if role != "admin" || !active {
+		var currentRole string
+		var currentActive bool
+		err := s.pool.QueryRow(ctx, "SELECT role, active FROM users WHERE id = $1", id).Scan(&currentRole, &currentActive)
+		if err == pgx.ErrNoRows {
+			return models.UserDTO{}, ErrNotFound
+		}
+		if err != nil {
+			return models.UserDTO{}, err
+		}
+		if normalizeRoleV32(currentRole) == "admin" && currentActive {
+			var others int
+			if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = true AND id <> $1", id).Scan(&others); err != nil {
+				return models.UserDTO{}, err
+			}
+			if others == 0 {
+				return models.UserDTO{}, fmt.Errorf("no se puede degradar ni desactivar al último administrador activo")
+			}
+		}
+	}
 	username := strings.TrimSpace(req.Username)
 	var user models.UserDTO
 	err := s.pool.QueryRow(ctx, `
@@ -182,8 +205,9 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	if err := s.EnsureV32Schema(ctx); err != nil {
 		return err
 	}
-	var username string
-	err := s.pool.QueryRow(ctx, "SELECT username FROM users WHERE id = $1", id).Scan(&username)
+	var username, role string
+	var active bool
+	err := s.pool.QueryRow(ctx, "SELECT username, role, active FROM users WHERE id = $1", id).Scan(&username, &role, &active)
 	if err == pgx.ErrNoRows {
 		return ErrNotFound
 	}
@@ -192,6 +216,15 @@ func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	}
 	if strings.EqualFold(strings.TrimSpace(username), "admin") {
 		return fmt.Errorf("no se puede eliminar el usuario admin")
+	}
+	if normalizeRoleV32(role) == "admin" && active {
+		var others int
+		if err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = true AND id <> $1", id).Scan(&others); err != nil {
+			return err
+		}
+		if others == 0 {
+			return fmt.Errorf("no se puede eliminar al último administrador activo")
+		}
 	}
 	result, err := s.pool.Exec(ctx, "DELETE FROM users WHERE id = $1", id)
 	if err != nil {

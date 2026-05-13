@@ -9,12 +9,12 @@
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "preact": "latest",
-    "lucide-react": "latest"
+    "@vitejs/plugin-react": "6.0.1",
+    "vite": "8.0.11",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "preact": "10.27.2",
+    "lucide-react": "1.14.0"
   },
   "devDependencies": {}
 }

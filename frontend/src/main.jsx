@@ -64,6 +64,20 @@ const LIST_REFRESH_MS  = 30_000; // lista de agentes
 const STATUS_REFRESH_MS = 10_000; // estado/detail del agente
 const CHART_REFRESH_MS = 30_000; // historial para graficas
 
+function decodeJWTRole(token) {
+  if (!token) return '';
+  try {
+    const payload = token.split('.')[1];
+    if (!payload) return '';
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = JSON.parse(atob(padded));
+    return (decoded?.role || '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem('rm_token') || '');
   const [view, setView] = useState('dashboard');
@@ -79,13 +93,19 @@ function Shell({ token, view, setView, onLogout }) {
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [agentsInitialFilter, setAgentsInitialFilter] = useState('all');
   const api = useMemo(() => createApi(token, onLogout), [token, onLogout]);
-  const nav = [
+  const role = useMemo(() => decodeJWTRole(token), [token]);
+  const isAdmin = role === 'admin';
+  const baseNav = [
     ['dashboard', LayoutDashboard, 'Dashboard'],
     ['agents', Server, 'Equipos'],
     ['enroll', KeyRound, 'Alta agente'],
     ['alerts', ShieldAlert, 'Alertas'],
     ['settings', Settings, 'Configuración'],
   ];
+  const nav = baseNav.filter(([id]) => id !== 'settings' || isAdmin);
+  useEffect(() => {
+    if (view === 'settings' && !isAdmin) setView('dashboard');
+  }, [view, isAdmin, setView]);
   const navigateTo = (target, opts = {}) => {
     if (target === 'agents') {
       setSelectedAgent(null);
@@ -124,7 +144,7 @@ function Shell({ token, view, setView, onLogout }) {
           {view === 'agents' && (selectedAgent ? <AgentDetail api={api} agentId={selectedAgent} onBack={() => setSelectedAgent(null)} /> : <Agents api={api} onSelect={setSelectedAgent} initialFilter={agentsInitialFilter} />)}
           {view === 'enroll' && <Enrollment api={api} />}
           {view === 'alerts' && <AlertsCenter api={api} />}
-          {view === 'settings' && <SettingsPage api={api} />}
+          {view === 'settings' && isAdmin && <SettingsPage api={api} />}
         </Suspense>
       </main>
     </div>
