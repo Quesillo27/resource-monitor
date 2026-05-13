@@ -610,7 +610,7 @@ function expandDiskRules(rules, disks, agentId) {
 
 function AgentRulesTab({ api, agentId, disks }) {
   const [rules, setRules] = useState(null);
-  const [expanded, setExpanded] = useState(false);
+  const [pendingExpand, setPendingExpand] = useState(false);
   const [customEnabled, setCustomEnabled] = useState(false);
   const [smtpOk, setSmtpOk] = useState(false);
   const [telegramOk, setTelegramOk] = useState(false);
@@ -620,7 +620,6 @@ function AgentRulesTab({ api, agentId, disks }) {
 
   const loadAll = () => {
     let alive = true;
-    setExpanded(false);
     Promise.all([
       api.get(`/api/agents/${agentId}/alert-rules`),
       api.get('/api/alert-settings/smtp'),
@@ -628,6 +627,7 @@ function AgentRulesTab({ api, agentId, disks }) {
     ]).then(([rulesData, smtp, tg]) => {
       if (!alive) return;
       setRules(rulesData.rules || []);
+      setPendingExpand(true);
       setCustomEnabled(!!rulesData.custom_rules_enabled);
       setSmtpOk(!!(smtp.enabled && smtp.host));
       setTelegramOk(!!(tg.enabled && tg.chat_ids));
@@ -636,10 +636,10 @@ function AgentRulesTab({ api, agentId, disks }) {
   };
 
   useEffect(() => {
-    if (expanded || !rules || !disks || disks.length === 0) return;
+    if (!pendingExpand || !rules || !disks || disks.length === 0) return;
     setRules((prev) => expandDiskRules(prev, disks, agentId));
-    setExpanded(true);
-  }, [rules, disks, expanded, agentId]);
+    setPendingExpand(false);
+  }, [pendingExpand, rules, disks, agentId]);
 
   async function toggleCustom(next) {
     setSaving(true);
@@ -674,6 +674,7 @@ function AgentRulesTab({ api, agentId, disks }) {
       }));
       const saved = await api.put(`/api/agents/${agentId}/alert-rules`, { rules: payload });
       setRules(saved.rules || []);
+      setPendingExpand(true);
       setMessage({ type: 'ok', text: 'Reglas guardadas correctamente' });
     } catch (e) {
       setMessage({ type: 'err', text: 'Error: ' + e.message });
@@ -690,6 +691,7 @@ function AgentRulesTab({ api, agentId, disks }) {
       await api.post(`/api/agents/${agentId}/alert-rules/reset`, {});
       const fresh = await api.get(`/api/agents/${agentId}/alert-rules`);
       setRules(fresh.rules || []);
+      setPendingExpand(true);
       setMessage({ type: 'ok', text: 'Reglas restauradas a defaults globales' });
     } catch (e) {
       setMessage({ type: 'err', text: 'Error: ' + e.message });
