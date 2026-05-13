@@ -54,7 +54,13 @@ func CheckLatest(ctx context.Context, serverURL, currentVersion string) (latest 
 	}
 
 	latest = payload.Version
-	hasUpdate = latest != "" && latest != currentVersion
+	// "unknown" / "dev" significan que el server no tiene version resoluble
+	// (ej. release manual sin -ldflags). No tratar eso como update disponible
+	// para evitar intentos de update inutiles cada 24h.
+	if latest == "" || latest == "unknown" || latest == "dev" || currentVersion == "" || currentVersion == "unknown" || currentVersion == "dev" {
+		return latest, false, nil
+	}
+	hasUpdate = latest != currentVersion
 	return latest, hasUpdate, nil
 }
 

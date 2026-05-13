@@ -65,9 +65,21 @@ func (s *Server) requireUser(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "invalid bearer token")
 			return
 		}
-		role := c.Role
+		// Revalidar contra DB en cada request: si el usuario fue desactivado
+		// o eliminado, UserRole devuelve ErrUnauthorized y el token vigente
+		// deja de funcionar antes de que expire.
+		freshRole, err := s.store.UserRole(r.Context(), c.UserID)
+		if errors.Is(err, store.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "user inactive or removed")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "auth lookup failed")
+			return
+		}
+		role := freshRole
 		if role == "" {
-			role, _ = s.store.UserRole(r.Context(), c.UserID)
+			role = c.Role
 		}
 		if role == "" {
 			role = "viewer"

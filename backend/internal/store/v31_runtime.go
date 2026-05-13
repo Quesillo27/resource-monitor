@@ -199,7 +199,16 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 	if telegramCfg.CooldownMinutes <= 0 {
 		telegramCfg.CooldownMinutes = 30
 	}
-	rows, err := s.pool.Query(ctx, `
+	// Tx + SELECT ... FOR UPDATE SKIP LOCKED garantiza que dos goroutines
+	// (runAlertDispatcher cada 30s y EvaluateOfflineAlerts cada 60s) nunca
+	// procesen la misma alerta en paralelo: la segunda salta las filas que
+	// la primera ya tiene tomadas y las verá ya marcadas como notificadas.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `
 		SELECT al.id::text, a.name, al.severity, al.message, al.resource_key,
 		       al.observed_value, al.threshold_value, al.unit, al.duration_samples,
 		       al.notify_email, al.notify_telegram, al.notification_count, al.telegram_notification_count,
@@ -214,21 +223,23 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		  )
 		ORDER BY al.severity = 'critical' DESC, al.opened_at DESC
 		LIMIT 10
+		FOR UPDATE OF al SKIP LOCKED
 	`, smtpCfg.CooldownMinutes, telegramCfg.CooldownMinutes)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 	pending := []pendingAlertV32{}
 	for rows.Next() {
 		var alert pendingAlertV32
 		if err := rows.Scan(&alert.ID, &alert.Agent, &alert.Severity, &alert.Message, &alert.ResourceKey, &alert.ObservedValue, &alert.ThresholdValue, &alert.Unit, &alert.DurationSamples, &alert.NotifyEmail, &alert.NotifyTelegram, &alert.NotificationCount, &alert.TelegramNotificationCount, &alert.CooldownMinutes, &alert.OpenedAt); err != nil {
+			rows.Close()
 			return err
 		}
 		pending = append(pending, alert)
 	}
-	if rows.Err() != nil {
-		return rows.Err()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
 	}
 	for _, alert := range pending {
 		processes, err := s.alertProcessSnapshot(ctx, alert.ID)
@@ -238,19 +249,19 @@ func (s *Store) NotifyDueAlertsV31(ctx context.Context) error {
 		if alert.NotifyEmail && smtpCfg.Enabled && strings.TrimSpace(smtpCfg.Host) != "" && strings.TrimSpace(smtpCfg.ToAddresses) != "" && strings.TrimSpace(smtpCfg.FromAddress) != "" {
 			if err := sendAlertHTMLMailV32(smtpCfg, alert, processes); err != nil {
 				log.Printf("alert email send failed for %s: %v", alert.ID, err)
-			} else if _, err := s.pool.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+			} else if _, err := tx.Exec(ctx, "UPDATE alerts SET last_notified_at = now(), notification_count = notification_count + 1 WHERE id = $1", alert.ID); err != nil {
 				return err
 			}
 		}
 		if alert.NotifyTelegram && telegramCfg.Enabled && strings.TrimSpace(telegramCfg.BotToken) != "" && strings.TrimSpace(telegramCfg.ChatIDs) != "" {
 			if err := sendTelegramV32(telegramCfg, telegramAlertTextV32(alert, processes)); err != nil {
 				log.Printf("alert telegram send failed for %s: %v", alert.ID, err)
-			} else if _, err := s.pool.Exec(ctx, "UPDATE alerts SET telegram_notified_at = now(), telegram_notification_count = telegram_notification_count + 1 WHERE id = $1", alert.ID); err != nil {
+			} else if _, err := tx.Exec(ctx, "UPDATE alerts SET telegram_notified_at = now(), telegram_notification_count = telegram_notification_count + 1 WHERE id = $1", alert.ID); err != nil {
 				return err
 			}
 		}
 	}
-	return nil
+	return tx.Commit(ctx)
 }
 
 func (s *Store) SafeAgentNameV31(ctx context.Context, id string) (string, error) {

@@ -235,7 +235,17 @@ func bumpRuleMatch(ctx context.Context, tx pgx.Tx, agentID string, rule models.A
 
 func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models.AlertRule, value alertValue, count int, message string, processes []models.ProcMetric) error {
 	var alertID string
+	var previousSeverity *string
+	var inserted bool
+	// xmax = 0 sobre la fila retornada distingue INSERT (xmax=0) de UPDATE (xmax!=0).
+	// Truco estándar de Postgres para upserts cuando importa saber qué pasó.
+	// previousSeverity captura la severidad ANTES del UPDATE para detectar escalación.
 	err := tx.QueryRow(ctx, `
+		WITH prev AS (
+			SELECT severity AS old_severity
+			FROM alerts
+			WHERE agent_id = $1 AND type = $2 AND resource_key = $3 AND active = true
+		)
 		INSERT INTO alerts
 			(agent_id, type, resource_key, severity, message, rule_id, observed_value, threshold_value, unit, duration_samples, notify_email, notify_telegram, cooldown_minutes)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
@@ -250,13 +260,23 @@ func upsertRuleAlert(ctx context.Context, tx pgx.Tx, agentID string, rule models
 		              notify_email = EXCLUDED.notify_email,
 		              notify_telegram = EXCLUDED.notify_telegram,
 		              cooldown_minutes = EXCLUDED.cooldown_minutes,
-		              last_seen_at = now()
-		RETURNING id::text
-	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.NotifyTelegram, rule.CooldownMinutes).Scan(&alertID)
+		              last_seen_at = now(),
+		              seen_at = CASE WHEN alerts.severity <> EXCLUDED.severity THEN NULL ELSE alerts.seen_at END,
+		              seen_by_user_id = CASE WHEN alerts.severity <> EXCLUDED.severity THEN NULL ELSE alerts.seen_by_user_id END,
+		              seen_by_username = CASE WHEN alerts.severity <> EXCLUDED.severity THEN NULL ELSE alerts.seen_by_username END
+		RETURNING id::text, (xmax = 0) AS inserted, (SELECT old_severity FROM prev)
+	`, agentID, value.Metric, value.ResourceKey, rule.Severity, message, rule.ID, value.Value, rule.Threshold, strings.TrimSpace(value.Unit), count, rule.NotifyEmail, rule.NotifyTelegram, rule.CooldownMinutes).Scan(&alertID, &inserted, &previousSeverity)
 	if err != nil {
 		return err
 	}
-	return attachAlertProcessSnapshot(ctx, tx, alertID, processes)
+	// Snapshot de procesos solo al abrir la alerta o al escalar severidad
+	// (warning -> critical). Las actualizaciones rutinarias preservan el
+	// snapshot original que disparo la alerta.
+	severityChanged := previousSeverity != nil && *previousSeverity != rule.Severity
+	if inserted || severityChanged {
+		return attachAlertProcessSnapshot(ctx, tx, alertID, processes)
+	}
+	return nil
 }
 
 func ruleSpecificity(rule models.AlertRule) int {

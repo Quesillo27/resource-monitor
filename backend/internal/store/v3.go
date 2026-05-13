@@ -612,7 +612,7 @@ func historyWindowV3(rangeName string) (string, string) {
 	case "1h":
 		return "1 hour", "1 minute"
 	case "6h":
-		return "6 hours", "5 minutes"
+		return "6 hours", "2 minutes"
 	case "12h":
 		return "12 hours", "5 minutes"
 	case "7d":
@@ -690,7 +690,11 @@ func installCommandV3(serverURL, downloadURL, token, agentName, style, releaseVe
 	}
 	if strings.EqualFold(style, "windows") {
 		psNameArg := strings.ReplaceAll(nameArg, " --name ", " -Name ")
-		return fmt.Sprintf("try { iwr %s/install-agent.ps1 -OutFile install-agent.ps1 -UseBasicParsing -ErrorAction Stop } catch { Write-Error $_.Exception.Message; exit 1 }; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl %s -DownloadUrl %s -EnrollmentToken %s%s -Profile %s -Interval %d", downloadBase, serverURL, downloadBase, token, psNameArg, profile, interval)
+		psServices := ""
+		if strings.TrimSpace(services) != "" {
+			psServices = " -Services " + shellQuoteV3(services)
+		}
+		return fmt.Sprintf("try { iwr %s/install-agent.ps1 -OutFile install-agent.ps1 -UseBasicParsing -ErrorAction Stop } catch { Write-Error $_.Exception.Message; exit 1 }; powershell -ExecutionPolicy Bypass -File .\\install-agent.ps1 -ServerUrl %s -DownloadUrl %s -EnrollmentToken %s%s -Profile %s -Interval %d%s", downloadBase, serverURL, downloadBase, token, psNameArg, profile, interval, psServices)
 	}
 	return fmt.Sprintf("curl -fsSL %s/install-agent.sh | sudo bash -s -- --server-url %s --download-url %s --enrollment-token %s%s%s", downloadBase, shellQuoteV3(serverURL), shellQuoteV3(downloadBase), shellQuoteV3(token), nameArg, optional)
 }

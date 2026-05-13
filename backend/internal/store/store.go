@@ -483,6 +483,10 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 			agent.Tags = []string{}
 		}
 		agent.UptimeSeconds = uint64(uptime)
+		// Si el equipo esta offline, las metricas del ultimo sample son
+		// engañosas (pueden mostrar CPU/RAM altos del momento que se desconecto).
+		// OfflineStatusZero pone CPU/RAM a 0 para evitar lecturas "stale".
+		OfflineStatusZero(&agent)
 		agents = append(agents, agent)
 	}
 	return agents, rows.Err()
