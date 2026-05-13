@@ -561,8 +561,56 @@ function RuleRow({ rule, unit, smtpOk, telegramOk, onChange }) {
   );
 }
 
+function expandDiskRules(rules, disks, agentId) {
+  if (!Array.isArray(rules)) return rules;
+  const diskRules = rules.filter((r) => r.metric === 'disk_used_percent');
+  const defaultWarn = diskRules.find((r) => r.resource_key === '' && r.severity === 'warning');
+  const defaultCrit = diskRules.find((r) => r.resource_key === '' && r.severity === 'critical');
+  const existingMounts = new Set(diskRules.map((r) => r.resource_key).filter((k) => k !== ''));
+  const additions = [];
+  const seen = new Set();
+  for (const d of disks || []) {
+    const mount = (d?.mountpoint || d?.name || '').trim();
+    if (!mount || existingMounts.has(mount) || seen.has(mount)) continue;
+    seen.add(mount);
+    additions.push({
+      id: `auto:${mount}:warning`,
+      agent_id: agentId,
+      metric: 'disk_used_percent',
+      resource_key: mount,
+      severity: 'warning',
+      enabled: defaultWarn?.enabled ?? true,
+      threshold: defaultWarn?.threshold ?? 70,
+      duration_samples: defaultWarn?.duration_samples ?? 2,
+      notify_email: defaultWarn?.notify_email ?? false,
+      notify_telegram: defaultWarn?.notify_telegram ?? false,
+      cooldown_minutes: defaultWarn?.cooldown_minutes ?? 30,
+      description: `Disco ${mount} sobre umbral warning`,
+      source: 'agent',
+    });
+    additions.push({
+      id: `auto:${mount}:critical`,
+      agent_id: agentId,
+      metric: 'disk_used_percent',
+      resource_key: mount,
+      severity: 'critical',
+      enabled: defaultCrit?.enabled ?? true,
+      threshold: defaultCrit?.threshold ?? 90,
+      duration_samples: defaultCrit?.duration_samples ?? 2,
+      notify_email: defaultCrit?.notify_email ?? true,
+      notify_telegram: defaultCrit?.notify_telegram ?? false,
+      cooldown_minutes: defaultCrit?.cooldown_minutes ?? 30,
+      description: `Disco ${mount} sobre umbral critical`,
+      source: 'agent',
+    });
+  }
+  const withoutDefault = rules.filter((r) => !(r.metric === 'disk_used_percent' && r.resource_key === ''));
+  return [...withoutDefault, ...additions];
+}
+
 function AgentRulesTab({ api, agentId, disks }) {
   const [rules, setRules] = useState(null);
+  const [expanded, setExpanded] = useState(false);
   const [customEnabled, setCustomEnabled] = useState(false);
   const [smtpOk, setSmtpOk] = useState(false);
   const [telegramOk, setTelegramOk] = useState(false);
@@ -572,6 +620,7 @@ function AgentRulesTab({ api, agentId, disks }) {
 
   const loadAll = () => {
     let alive = true;
+    setExpanded(false);
     Promise.all([
       api.get(`/api/agents/${agentId}/alert-rules`),
       api.get('/api/alert-settings/smtp'),
@@ -585,6 +634,12 @@ function AgentRulesTab({ api, agentId, disks }) {
     }).catch((e) => alive && setMessage({ type: 'err', text: 'Error cargando reglas: ' + e.message }));
     return () => { alive = false; };
   };
+
+  useEffect(() => {
+    if (expanded || !rules || !disks || disks.length === 0) return;
+    setRules((prev) => expandDiskRules(prev, disks, agentId));
+    setExpanded(true);
+  }, [rules, disks, expanded, agentId]);
 
   async function toggleCustom(next) {
     setSaving(true);
