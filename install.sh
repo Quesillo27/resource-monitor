@@ -51,8 +51,7 @@ RETENTION_DAYS=30
 OFFLINE_AFTER_SECONDS=180
 VITE_API_BASE_URL=
 ALLOWED_ORIGINS=
-AGENT_RELEASE_VERSION=v1.4.0
-MANAGER_VERSION=v1.5.0
+MANAGER_BUILD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # RM_REPO_DIR: path ABSOLUTO del host donde vive el repo. Los bind mounts
 # del compose lo usan en lugar de paths relativos para que docker compose
 # ejecutado desde otro cwd (ej: desde el container manager-updater) genere
@@ -77,7 +76,14 @@ else
     warn "ADMIN_PASSWORD débil detectado — rotado automáticamente."
     warn "Nuevo password: ${NEW_PASS}  (guárdalo ahora)"
   fi
-  ok ".env actualizado (RM_REPO_DIR=${CURRENT_DIR})."
+  # Actualizar MANAGER_BUILD_SHA al SHA actual del repo
+  CURRENT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+  if grep -q '^MANAGER_BUILD_SHA=' .env; then
+    perl -i -pe "s|^MANAGER_BUILD_SHA=.*|MANAGER_BUILD_SHA=${CURRENT_SHA}|" .env
+  else
+    printf '\nMANAGER_BUILD_SHA=%s\n' "$CURRENT_SHA" >> .env
+  fi
+  ok ".env actualizado (RM_REPO_DIR=${CURRENT_DIR}, MANAGER_BUILD_SHA=${CURRENT_SHA})."
 fi
 
 info "Instalando comando 'resource-monitor' en /usr/local/bin/..."
