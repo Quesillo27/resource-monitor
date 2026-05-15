@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,37 +18,43 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// MaskDSN replaces the password in a DSN with ****. Returns the input unchanged
-// if it cannot be parsed as a URL. For non-URL DSNs (e.g. Redis host:port) returns
-// as-is since they don't carry the password inline.
+// MaskDSN replaces the password in a DSN with **** (literal, not URL-encoded).
+// Returns the input unchanged if it cannot be parsed as a URL. For non-URL DSNs
+// (e.g. Redis host:port) returns as-is since they don't carry the password inline.
 func MaskDSN(dsn string) string {
 	if dsn == "" || !strings.Contains(dsn, "://") {
 		return dsn
 	}
-	u, err := url.Parse(dsn)
-	if err != nil || u.User == nil {
+	// Find scheme:// prefix
+	schemeEnd := strings.Index(dsn, "://")
+	if schemeEnd < 0 {
 		return dsn
 	}
-	if _, hasPwd := u.User.Password(); !hasPwd {
-		return dsn
+	prefix := dsn[:schemeEnd+3]
+	rest := dsn[schemeEnd+3:]
+
+	// Find '@' separating userinfo from host
+	at := strings.Index(rest, "@")
+	if at < 0 {
+		return dsn // no userinfo, nothing to mask
 	}
-	u.User = url.UserPassword(u.User.Username(), "****")
-	return u.String()
+	userinfo := rest[:at]
+	hostAndPath := rest[at:]
+
+	// Split user:password
+	colon := strings.Index(userinfo, ":")
+	if colon < 0 {
+		return dsn // no password to mask
+	}
+	user := userinfo[:colon]
+	return prefix + user + ":****" + hostAndPath
 }
 
-// DSNIsMasked returns true if the DSN looks like it came from MaskDSN (password = ****).
+// DSNIsMasked returns true if the DSN looks like it came from MaskDSN (contains :****@).
 // Used by Update handlers to detect when the client returned the masked value and
 // the original DSN should be preserved.
 func DSNIsMasked(dsn string) bool {
-	if !strings.Contains(dsn, "://") {
-		return false
-	}
-	u, err := url.Parse(dsn)
-	if err != nil || u.User == nil {
-		return false
-	}
-	pwd, hasPwd := u.User.Password()
-	return hasPwd && pwd == "****"
+	return strings.Contains(dsn, ":****@")
 }
 
 func (s *Store) ensureDBMonitorSchema(ctx context.Context) error {

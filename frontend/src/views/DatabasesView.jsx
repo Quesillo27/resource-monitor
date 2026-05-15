@@ -1164,15 +1164,19 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
           </Panel>
           {samples.length >= 3 && (
             <Panel title={isPG ? 'Conexiones en el tiempo' : 'Clientes en el tiempo'}>
-              <LineChart samples={samples} field={isPG ? 'connections_total' : 'connected_clients'}
-                color={isPG ? '#3b82f6' : '#ef4444'}
-                label={isPG ? 'Conexiones totales' : 'Clientes conectados'}/>
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field={isPG ? 'connections_total' : 'connected_clients'}
+                  color={isPG ? '#3b82f6' : '#ef4444'}
+                  label={isPG ? 'Conexiones totales' : 'Clientes conectados'}/>
+              </div>
             </Panel>
           )}
           {isPG && samples.length >= 3 && (
-            <Panel title="Cache hit ratio (% bloques servidos desde memoria)">
-              <LineChart samples={samples} field="cache_hit_ratio"
-                color="#22c55e" label="Cache hit ratio" scale={100} suffix="%"/>
+            <Panel title="Cache hit ratio">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="cache_hit_ratio"
+                  color="#22c55e" label="Cache hit (%)" scale={100} suffix="%"/>
+              </div>
             </Panel>
           )}
         </div>
