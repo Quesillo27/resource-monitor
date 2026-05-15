@@ -404,33 +404,24 @@ function AgentProfileControl({ api, agentId, initialProfile, onChanged }) {
     try {
       await api.put(`/api/agents/${agentId}/profile`, { profile: next });
       setProfile(next);
-      setMsg('Perfil actualizado — se aplica en el próximo heartbeat del agente');
-      setTimeout(() => setMsg(''), 4000);
+      setMsg('Actualizado');
+      setTimeout(() => setMsg(''), 3000);
       if (onChanged) onChanged(next);
     } catch (e) {
-      setMsg('Error: ' + e.message);
+      setMsg('Error');
     } finally {
       setSaving(false);
     }
   }
-  const descriptions = {
-    minimal: 'Solo CPU, RAM y disco',
-    balanced: 'CPU, RAM, disco, red, 10 procesos, servicios',
-    full: 'Todo lo anterior + 20 procesos y temperaturas',
-  };
   return (
-    <div className="agent-interval-control">
-      <label>
-        <strong>Perfil de recolección:</strong>
-        <select value={profile} disabled={saving} onChange={(e) => change(e.target.value)}>
-          <option value="minimal">Minimal</option>
-          <option value="balanced">Balanced</option>
-          <option value="full">Full</option>
-        </select>
-      </label>
-      {profile && <span style={{ opacity: 0.65, fontSize: '0.8em', marginLeft: 8 }}>{descriptions[profile]}</span>}
-      {msg && <span className="interval-msg">{msg}</span>}
-    </div>
+    <span className="interval-pill" title="Perfil de recolección del agente">
+      <select value={profile} disabled={saving} onChange={(e) => change(e.target.value)} aria-label="Perfil de recolección">
+        <option value="minimal">Minimal</option>
+        <option value="balanced">Balanced</option>
+        <option value="full">Full</option>
+      </select>
+      {msg && <span className="interval-pill-msg">{msg}</span>}
+    </span>
   );
 }
 
@@ -1031,14 +1022,11 @@ function AgentRulesTab({ api, agentId, disks, agentProfile, onProfileChange }) {
   }
 
   return (
-    <>
-    <Panel title="Perfil de recolección">
-      <AgentProfileControl api={api} agentId={agentId} initialProfile={agentProfile} onChanged={onProfileChange} />
-    </Panel>
     <Panel
       title="Reglas de alertas"
       action={
         <div className="actions">
+          <AgentProfileControl api={api} agentId={agentId} initialProfile={agentProfile} onChanged={onProfileChange} />
           <label className="toggle-switch" title="Activar reglas personalizadas para este equipo">
             <input type="checkbox" checked={customEnabled} disabled={saving} onChange={(e) => toggleCustom(e.target.checked)} />
             <span>Reglas personalizadas</span>
@@ -1158,7 +1146,6 @@ function AgentRulesTab({ api, agentId, disks, agentProfile, onProfileChange }) {
       </footer>
       </>)}
     </Panel>
-    </>
   );
 }
 
