@@ -203,6 +203,7 @@ type Agent struct {
 	Tags          []string      `json:"tags"`
 	AgentVersion  string        `json:"agent_version,omitempty"`
 	PrimaryIP     string        `json:"primary_ip,omitempty"`
+	Profile       string        `json:"profile,omitempty"`
 	LastCommand   *AgentCommandSummary `json:"last_command,omitempty"`
 }
 
