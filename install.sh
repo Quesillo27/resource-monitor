@@ -62,13 +62,20 @@ RM_REPO_DIR=$(pwd)
 EOF
   ok ".env creado."
 else
-  info ".env ya existe — refrescando RM_REPO_DIR..."
+  info ".env ya existe — verificando y refrescando..."
   CURRENT_DIR=$(pwd)
   if grep -q '^RM_REPO_DIR=' .env; then
-    # macOS sed quiere -i ''  pero linux -i sin arg; usamos perl para portabilidad
     perl -i -pe "s|^RM_REPO_DIR=.*|RM_REPO_DIR=${CURRENT_DIR}|" .env
   else
     printf '\nRM_REPO_DIR=%s\n' "$CURRENT_DIR" >> .env
+  fi
+  # Rotar password débil si quedó del instalador viejo
+  EXISTING_PASS=$(grep -E '^ADMIN_PASSWORD=' .env | cut -d= -f2-)
+  if [ -z "$EXISTING_PASS" ] || [ "$EXISTING_PASS" = "admin" ] || [ "$EXISTING_PASS" = "admin123" ]; then
+    NEW_PASS=$(gen_hex 12)
+    perl -i -pe "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${NEW_PASS}|" .env
+    warn "ADMIN_PASSWORD débil detectado — rotado automáticamente."
+    warn "Nuevo password: ${NEW_PASS}  (guárdalo ahora)"
   fi
   ok ".env actualizado (RM_REPO_DIR=${CURRENT_DIR})."
 fi
