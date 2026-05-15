@@ -241,6 +241,26 @@ func (s *Store) SetAgentIntervalSeconds(ctx context.Context, agentID string, sec
 	return err
 }
 
+func (s *Store) GetAgentProfile(ctx context.Context, agentID string) (string, error) {
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return "", err
+	}
+	var profile string
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(profile, 'balanced') FROM agents WHERE id = $1`, agentID).Scan(&profile)
+	return profile, err
+}
+
+func (s *Store) SetAgentProfile(ctx context.Context, agentID, profile string) error {
+	if profile != "minimal" && profile != "balanced" && profile != "full" {
+		return fmt.Errorf("profile must be minimal, balanced or full")
+	}
+	if err := s.ensureAgentExists(ctx, agentID); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, `UPDATE agents SET profile = $2 WHERE id = $1`, agentID, profile)
+	return err
+}
+
 func (s *Store) GetAgentServiceChecks(ctx context.Context, agentID string) ([]string, error) {
 	if err := s.ensureAgentExists(ctx, agentID); err != nil {
 		return nil, err

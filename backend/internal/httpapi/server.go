@@ -91,6 +91,7 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin", "operator")).Post("/agents/{id}/alert-rules/reset", s.resetAgentAlertRules)
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/custom-rules-enabled", s.setAgentCustomRulesEnabled)
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/interval", s.setAgentInterval)
+			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/profile", s.setAgentProfile)
 			r.Get("/agents/{id}/services-config", s.getAgentServices)
 			r.With(s.requireRole("admin", "operator")).Put("/agents/{id}/services-config", s.setAgentServices)
 			r.With(s.requireRole("admin", "operator")).Patch("/agents/{id}", s.updateAgent)
@@ -528,6 +529,25 @@ func (s *Server) setAgentInterval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"interval_seconds": req.Seconds})
 }
 
+func (s *Server) setAgentProfile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Profile string `json:"profile"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	agentID := chi.URLParam(r, "id")
+	if err := s.store.SetAgentProfile(r.Context(), agentID, req.Profile); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "agent not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"profile": req.Profile})
+}
+
 func (s *Server) saveAgentAlertRules(w http.ResponseWriter, r *http.Request) {
 	var req models.AlertRulesRequest
 	if !decodeJSON(w, r, &req) {
@@ -744,6 +764,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 	commands, _ := s.store.PendingCommandsForAgent(r.Context(), agentID)
 	intervalSeconds, _ := s.store.GetAgentIntervalSeconds(r.Context(), agentID)
 	serviceChecks, _ := s.store.GetAgentServiceChecks(r.Context(), agentID)
+	profile, _ := s.store.GetAgentProfile(r.Context(), agentID)
 	// Si la DB no tiene servicios configurados pero el agente reporta los
 	// suyos locales (instalo con --services), hacer seed para que aparezcan
 	// en la UI y puedan editarse despues.
@@ -757,6 +778,7 @@ func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
 		"commands":         commands,
 		"interval_seconds": intervalSeconds,
 		"service_checks":   serviceChecks,
+		"profile":          profile,
 	})
 }
 

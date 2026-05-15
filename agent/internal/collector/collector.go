@@ -40,6 +40,7 @@ type Host struct {
 
 type Metrics struct {
 	CapturedAt        *time.Time   `json:"captured_at,omitempty"`
+	Profile           string       `json:"profile,omitempty"`
 	CPUPercent        float64      `json:"cpu_percent"`
 	MemoryTotalBytes  uint64       `json:"memory_total_bytes"`
 	MemoryUsedBytes   uint64       `json:"memory_used_bytes"`
@@ -200,6 +201,7 @@ func Collect(ctx context.Context, profile string, serviceChecks []string) (Metri
 		metrics.Services = collectServices(ctx, serviceChecks)
 	}
 	metrics.GatewayLatencyMs = measureGatewayLatency(ctx)
+	metrics.Profile = profile
 	return metrics, nil
 }
 

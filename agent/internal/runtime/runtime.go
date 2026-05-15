@@ -262,6 +262,15 @@ func sendOnce(ctx context.Context, cfg config.Config) error {
 	if resp != nil && resp.ServiceChecks != nil {
 		applyServiceChecksChange(&cfg, resp.ServiceChecks)
 	}
+	if resp != nil && resp.Profile != "" && resp.Profile != cfg.Profile {
+		log.Printf("profile updated by server: %s -> %s", cfg.Profile, resp.Profile)
+		cfg.Profile = resp.Profile
+		if cfg.ConfigPath != "" {
+			if err := config.Save(cfg.ConfigPath, cfg); err != nil {
+				log.Printf("profile persist failed: %v", err)
+			}
+		}
+	}
 	metrics, err := collector.Collect(ctx, cfg.Profile, cfg.ServiceChecks)
 	if err != nil {
 		return err

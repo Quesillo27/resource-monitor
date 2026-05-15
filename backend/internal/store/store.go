@@ -81,6 +81,7 @@ func (s *Store) ensureRuntimeSchema(ctx context.Context) error {
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS custom_rules_enabled BOOLEAN NOT NULL DEFAULT false",
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS interval_seconds INTEGER NOT NULL DEFAULT 60",
 		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS service_checks TEXT[] NOT NULL DEFAULT '{}'",
+		"ALTER TABLE agents ADD COLUMN IF NOT EXISTS profile TEXT NOT NULL DEFAULT 'balanced'",
 		`CREATE TABLE IF NOT EXISTS agent_commands (
 			id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 			agent_id     UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -445,6 +446,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		       COALESCE(ac.active_alerts, 0), COALESCE(dc.disk_count, 0), COALESCE(a.tags, '{}'),
 		       COALESCE(a.agent_version, ''),
 		       COALESCE(a.primary_ip, ''),
+		       COALESCE(a.profile, 'balanced'),
 		       lc.id, lc.command, lc.status, lc.created_at, lc.completed_at, lc.error
 		FROM agents a
 		LEFT JOIN latest l ON l.agent_id = a.id
@@ -466,7 +468,7 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		var uptime int64
 		var cmdID, cmdCommand, cmdStatus, cmdError *string
 		var cmdCreated, cmdCompleted *time.Time
-		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion, &agent.PrimaryIP,
+		if err := rows.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.OS, &agent.Arch, &uptime, &agent.Status, &agent.LastSeenAt, &agent.CreatedAt, &agent.CPUPercent, &agent.MemoryPercent, &agent.LastMetricAt, &agent.ActiveAlerts, &agent.DiskCount, &agent.Tags, &agent.AgentVersion, &agent.PrimaryIP, &agent.Profile,
 			&cmdID, &cmdCommand, &cmdStatus, &cmdCreated, &cmdCompleted, &cmdError); err != nil {
 			return nil, err
 		}
