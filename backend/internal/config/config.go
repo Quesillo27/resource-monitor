@@ -30,8 +30,8 @@ func Load() Config {
 	if len(secret) < 32 {
 		log.Fatal("JWT_SECRET must be at least 32 characters")
 	}
-	if adminPass == "" || adminPass == "admin123" {
-		log.Fatal("ADMIN_PASSWORD must be set to a secure value (not empty or default)")
+	if adminPass == "" || adminPass == "admin123" || adminPass == "admin" {
+		log.Fatal("ADMIN_PASSWORD must be set to a secure value (not empty, 'admin', or 'admin123')")
 	}
 
 	dbURL := env("DATABASE_URL", "postgres://monitor:monitor_pass@localhost:5432/resource_monitor?sslmode=disable")

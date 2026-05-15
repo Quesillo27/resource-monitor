@@ -7,6 +7,11 @@ name: Release
 # manualmente desde la pestaña Actions.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Versión del release (ej: v2.0.0). Si se deja vacío usa el tag git o el SHA corto.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -21,17 +26,33 @@ jobs:
         with:
           go-version: "1.25"
 
+      - name: Resolve version
+        id: ver
+        run: |
+          V="${{ github.event.inputs.version }}"
+          if [ -z "$V" ]; then
+            V="${GITHUB_REF_NAME:-}"
+          fi
+          if [ -z "$V" ] || [ "$V" = "refs/heads/main" ]; then
+            V="v0.0.0-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
       - name: Build Linux agent
         working-directory: agent
         run: |
           mkdir -p ../dist
           go mod tidy
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/resource-monitor-agent-linux-amd64 ./cmd/agent
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-X resource-monitor/agent/internal/version.Version=${{ steps.ver.outputs.version }}" \
+            -o ../dist/resource-monitor-agent-linux-amd64 ./cmd/agent
 
       - name: Build Windows agent
         working-directory: agent
         run: |
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../dist/resource-monitor-agent-windows-amd64.exe ./cmd/agent
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
+            -ldflags "-X resource-monitor/agent/internal/version.Version=${{ steps.ver.outputs.version }}" \
+            -o ../dist/resource-monitor-agent-windows-amd64.exe ./cmd/agent
 
       - name: Build backend
         working-directory: backend
@@ -44,13 +65,25 @@ jobs:
           cp scripts/install-agent.sh dist/install-agent.sh
           cp scripts/install-agent.ps1 dist/install-agent.ps1
 
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum \
+            resource-monitor-agent-linux-amd64 \
+            resource-monitor-agent-windows-amd64.exe \
+            resource-monitor-server-linux-amd64 \
+            install-agent.sh \
+            install-agent.ps1 > checksums.txt
+          cat checksums.txt
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'manual-release' }}
+          tag_name: ${{ steps.ver.outputs.version }}
           files: |
             dist/resource-monitor-agent-linux-amd64
             dist/resource-monitor-agent-windows-amd64.exe
             dist/resource-monitor-server-linux-amd64
             dist/install-agent.sh
             dist/install-agent.ps1
+            dist/checksums.txt

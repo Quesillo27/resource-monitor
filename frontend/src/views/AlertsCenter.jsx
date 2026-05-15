@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { AlertTriangle, Bell, Eye, Mail, Save, Send } from 'lucide-react';
+import { AlertTriangle, Eye, Save } from 'lucide-react';
 import {
   AlertList,
   Header,
@@ -109,83 +109,6 @@ function Alerts({ api }) {
   );
 }
 
-function SMTPSettings({ api }) {
-  const { data, reload } = useLoad(() => api.get('/api/alert-settings/smtp'), [], 0);
-  const [form, setForm] = useState(null);
-  const [message, setMessage] = useState('');
-  useEffect(() => { if (data && !form) setForm({ ...data, password: '' }); }, [data, form]);
-  if (!form) return <Skeleton />;
-  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
-  async function save() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    const saved = await api.put('/api/alert-settings/smtp', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
-    setForm({ ...saved, password: '' });
-    setMessage('Configuracion guardada');
-    reload();
-  }
-  async function test() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    await api.post('/api/alert-settings/smtp/test', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
-    setMessage('Correo de prueba enviado');
-  }
-  return (
-    <Panel title="Configuracion SMTP" action={<div className="actions"><IconButton icon={Send} label="Probar SMTP" onClick={test} /><IconButton icon={Mail} label="Guardar SMTP" onClick={save} /></div>}>
-      <div className="smtp-grid">
-        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar correos</span></label>
-        <label>Host<input value={form.host} onChange={(e) => set('host', e.target.value)} /></label>
-        <label>Puerto<input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} /></label>
-        <label>Usuario<input value={form.username} onChange={(e) => set('username', e.target.value)} /></label>
-        <label>Contrasena<input type="password" value={form.password} placeholder="Mantener actual si se deja vacia" onChange={(e) => set('password', e.target.value)} /></label>
-        <label>Remitente<input value={form.from_address} onChange={(e) => set('from_address', e.target.value)} /></label>
-        <label>Destinatarios<input value={form.to_addresses} onChange={(e) => set('to_addresses', e.target.value)} placeholder="ops@empresa.com,infra@empresa.com" /></label>
-        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
-        <label><span><input type="checkbox" checked={!!form.use_tls} onChange={(e) => set('use_tls', e.target.checked)} /> TLS directo</span></label>
-        <label><span><input type="checkbox" checked={!!form.use_starttls} onChange={(e) => set('use_starttls', e.target.checked)} /> STARTTLS</span></label>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-    </Panel>
-  );
-}
-
-function TelegramSettings({ api }) {
-  const { data, reload } = useLoad(() => api.get('/api/settings/telegram'), [], 0);
-  const [form, setForm] = useState(null);
-  const [message, setMessage] = useState('');
-  useEffect(() => { if (data && !form) setForm({ ...data, bot_token: '' }); }, [data, form]);
-  if (!form) return <Skeleton />;
-  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
-  async function save() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    const saved = await api.put('/api/settings/telegram', { ...form, cooldown_minutes: cooldown });
-    setForm({ ...saved, bot_token: '' });
-    setMessage('Configuracion guardada');
-    reload();
-  }
-  async function test() {
-    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
-    await api.post('/api/settings/telegram/test', { ...form, cooldown_minutes: cooldown });
-    setMessage('Mensaje de prueba enviado');
-  }
-  return (
-    <Panel title="Configuracion Telegram" action={<div className="actions"><IconButton icon={Send} label="Probar Telegram" onClick={test} /><IconButton icon={Bell} label="Guardar Telegram" onClick={save} /></div>}>
-      <div className="smtp-grid">
-        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar Telegram</span></label>
-        <label>Bot Token<input type="password" value={form.bot_token} placeholder="Mantener actual si se deja vacio" onChange={(e) => set('bot_token', e.target.value)} /></label>
-        <label>Chat IDs<input value={form.chat_ids} onChange={(e) => set('chat_ids', e.target.value)} placeholder="-100123456789,@canal" /></label>
-        <label>Modo parse
-          <select value={form.parse_mode || 'HTML'} onChange={(e) => set('parse_mode', e.target.value)}>
-            <option value="HTML">HTML</option>
-            <option value="Markdown">Markdown</option>
-            <option value="MarkdownV2">MarkdownV2</option>
-          </select>
-        </label>
-        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
-      </div>
-      {message && <p className="success-text">{message}</p>}
-    </Panel>
-  );
-}
-
 function AlertRulesPanel({ api }) {
   const [rules, setRules] = useState(null);
   const [smtpOk, setSmtpOk] = useState(false);
@@ -230,8 +153,8 @@ function AlertRulesPanel({ api }) {
 
   return (
     <Panel title="Reglas globales de alerta" action={<IconButton icon={Save} label="Guardar reglas" onClick={save} />}>
-      {!smtpOk && <p className="warn-inline">SMTP no habilitado — activa SMTP en la pestaña SMTP para usar notificaciones por email</p>}
-      {!telegramOk && <p className="warn-inline">Telegram no habilitado — configura Telegram en la pestaña Telegram para usar notificaciones por Telegram</p>}
+      {!smtpOk && <p className="warn-inline">SMTP no habilitado — configura en <strong>Configuración → SMTP</strong> para usar notificaciones por email</p>}
+      {!telegramOk && <p className="warn-inline">Telegram no habilitado — configura en <strong>Configuración → Telegram</strong> para usar notificaciones por Telegram</p>}
       <div className="table-wrap">
         <table className="data-table">
           <thead>
@@ -297,15 +220,11 @@ export default function AlertsCenter({ api }) {
         <button className={tab === 'stats' ? 'selected' : ''} onClick={() => setTab('stats')}>Estadísticas</button>
         <button className={tab === 'timeline' ? 'selected' : ''} onClick={() => setTab('timeline')}>Timeline</button>
         <button className={tab === 'rules' ? 'selected' : ''} onClick={() => setTab('rules')}>Reglas</button>
-        <button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button>
-        <button className={tab === 'telegram' ? 'selected' : ''} onClick={() => setTab('telegram')}>Telegram</button>
       </div>
       {tab === 'alerts' && <Alerts api={api} />}
       {tab === 'stats' && <AlertStats api={api} />}
       {tab === 'timeline' && <AlertTimeline api={api} />}
       {tab === 'rules' && <AlertRulesPanel api={api} />}
-      {tab === 'smtp' && <SMTPSettings api={api} />}
-      {tab === 'telegram' && <TelegramSettings api={api} />}
     </section>
   );
 }

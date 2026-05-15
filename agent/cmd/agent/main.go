@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -281,6 +282,7 @@ func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	fs.IntVar(&cfg.IntervalSeconds, "interval", 0, fmt.Sprintf("collection interval in seconds (min %d)", config.MinIntervalSeconds))
 	fs.BoolVar(&cfg.InsecureSkipTLS, "insecure-skip-tls", false, "skip TLS certificate verification (only for self-signed servers in LAN)")
 	fs.StringVar(&cfg.StatusListenAddr, "status-listen", "", "address for local status HTTP endpoint (e.g. 127.0.0.1:9099)")
+	fs.BoolVar(&cfg.AllowPublicStatus, "allow-public-status", false, "allow --status-listen to bind on a non-loopback address (network-visible, no auth)")
 	return fs, cfg
 }
 
@@ -290,6 +292,16 @@ func normalizeFlagConfig(cfg *config.Config) {
 	}
 	if cfg.ServiceChecksCSV != "" {
 		cfg.ServiceChecks = append(cfg.ServiceChecks, config.SplitCSV(cfg.ServiceChecksCSV)...)
+	}
+	if cfg.StatusListenAddr != "" {
+		host, _, err := net.SplitHostPort(cfg.StatusListenAddr)
+		if err != nil {
+			log.Fatalf("--status-listen: invalid address %q: %v", cfg.StatusListenAddr, err)
+		}
+		loopback := host == "127.0.0.1" || host == "::1" || host == "localhost"
+		if !loopback && !cfg.AllowPublicStatus {
+			log.Fatalf("--status-listen: binding to %q exposes the status endpoint on the network without authentication.\nUse 127.0.0.1:<port> for local-only access, or add --allow-public-status to override.", host)
+		}
 	}
 }
 

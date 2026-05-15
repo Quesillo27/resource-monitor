@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Edit3, KeyRound, Save, Trash2 } from 'lucide-react';
-import { Header, Panel, Modal, IconButton, RefreshMeta, useLoad, date } from '../lib/ui';
+import React, { useEffect, useState } from 'react';
+import { Bell, Edit3, KeyRound, Mail, Save, Send, Trash2 } from 'lucide-react';
+import { Header, Panel, Modal, IconButton, RefreshMeta, Skeleton, useLoad, date } from '../lib/ui';
 
 function UsersPanel({ api }) {
   const { data, loading, reload, lastUpdated } = useLoad(() => api.get('/api/users'), [], 0);
@@ -150,6 +150,83 @@ function UsersPanel({ api }) {
   );
 }
 
+function SMTPSettings({ api }) {
+  const { data, reload } = useLoad(() => api.get('/api/alert-settings/smtp'), [], 0);
+  const [form, setForm] = useState(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => { if (data && !form) setForm({ ...data, password: '' }); }, [data, form]);
+  if (!form) return <Skeleton />;
+  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
+  async function save() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    const saved = await api.put('/api/alert-settings/smtp', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
+    setForm({ ...saved, password: '' });
+    setMessage('Configuracion guardada');
+    reload();
+  }
+  async function test() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    await api.post('/api/alert-settings/smtp/test', { ...form, port: Number(form.port) || 587, cooldown_minutes: cooldown });
+    setMessage('Correo de prueba enviado');
+  }
+  return (
+    <Panel title="Configuracion SMTP" action={<div className="actions"><IconButton icon={Send} label="Probar SMTP" onClick={test} /><IconButton icon={Mail} label="Guardar SMTP" onClick={save} /></div>}>
+      <div className="smtp-grid">
+        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar correos</span></label>
+        <label>Host<input value={form.host} onChange={(e) => set('host', e.target.value)} /></label>
+        <label>Puerto<input type="number" value={form.port} onChange={(e) => set('port', e.target.value)} /></label>
+        <label>Usuario<input value={form.username} onChange={(e) => set('username', e.target.value)} /></label>
+        <label>Contrasena<input type="password" value={form.password} placeholder="Mantener actual si se deja vacia" onChange={(e) => set('password', e.target.value)} /></label>
+        <label>Remitente<input value={form.from_address} onChange={(e) => set('from_address', e.target.value)} /></label>
+        <label>Destinatarios<input value={form.to_addresses} onChange={(e) => set('to_addresses', e.target.value)} placeholder="ops@empresa.com,infra@empresa.com" /></label>
+        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
+        <label><span><input type="checkbox" checked={!!form.use_tls} onChange={(e) => set('use_tls', e.target.checked)} /> TLS directo</span></label>
+        <label><span><input type="checkbox" checked={!!form.use_starttls} onChange={(e) => set('use_starttls', e.target.checked)} /> STARTTLS</span></label>
+      </div>
+      {message && <p className="success-text">{message}</p>}
+    </Panel>
+  );
+}
+
+function TelegramSettings({ api }) {
+  const { data, reload } = useLoad(() => api.get('/api/settings/telegram'), [], 0);
+  const [form, setForm] = useState(null);
+  const [message, setMessage] = useState('');
+  useEffect(() => { if (data && !form) setForm({ ...data, bot_token: '' }); }, [data, form]);
+  if (!form) return <Skeleton />;
+  const set = (key, value) => setForm((next) => ({ ...next, [key]: value }));
+  async function save() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    const saved = await api.put('/api/settings/telegram', { ...form, cooldown_minutes: cooldown });
+    setForm({ ...saved, bot_token: '' });
+    setMessage('Configuracion guardada');
+    reload();
+  }
+  async function test() {
+    const cooldown = Math.max(1, parseInt(form.cooldown_minutes, 10) || 30);
+    await api.post('/api/settings/telegram/test', { ...form, cooldown_minutes: cooldown });
+    setMessage('Mensaje de prueba enviado');
+  }
+  return (
+    <Panel title="Configuracion Telegram" action={<div className="actions"><IconButton icon={Send} label="Probar Telegram" onClick={test} /><IconButton icon={Bell} label="Guardar Telegram" onClick={save} /></div>}>
+      <div className="smtp-grid">
+        <label><span><input type="checkbox" checked={!!form.enabled} onChange={(e) => set('enabled', e.target.checked)} /> Habilitar Telegram</span></label>
+        <label>Bot Token<input type="password" value={form.bot_token} placeholder="Mantener actual si se deja vacio" onChange={(e) => set('bot_token', e.target.value)} /></label>
+        <label>Chat IDs<input value={form.chat_ids} onChange={(e) => set('chat_ids', e.target.value)} placeholder="-100123456789,@canal" /></label>
+        <label>Modo parse
+          <select value={form.parse_mode || 'HTML'} onChange={(e) => set('parse_mode', e.target.value)}>
+            <option value="HTML">HTML</option>
+            <option value="Markdown">Markdown</option>
+            <option value="MarkdownV2">MarkdownV2</option>
+          </select>
+        </label>
+        <label>Cooldown minutos<input type="number" min="1" value={form.cooldown_minutes} onChange={(e) => set('cooldown_minutes', e.target.value)} /></label>
+      </div>
+      {message && <p className="success-text">{message}</p>}
+    </Panel>
+  );
+}
+
 function SystemPanel({ api }) {
   const { data: version } = useLoad(() => api.get('/api/agent/version').catch(() => ({})), [], 0);
   return (
@@ -159,11 +236,6 @@ function SystemPanel({ api }) {
           <span className="system-label">Versión del agente</span>
           <strong>{version?.version || 'desconocida'}</strong>
           <small>Versión disponible para agentes nuevos</small>
-        </div>
-        <div className="system-card">
-          <span className="system-label">Canales de notificación</span>
-          <strong>SMTP y Telegram</strong>
-          <small>Configura desde la pestaña Alertas → SMTP / Telegram</small>
         </div>
         <div className="system-card">
           <span className="system-label">Reglas de alertas</span>
@@ -182,9 +254,13 @@ export default function SettingsPage({ api }) {
       <Header title="Configuración" />
       <div className="tab-row">
         <button className={tab === 'users' ? 'selected' : ''} onClick={() => setTab('users')}>Usuarios</button>
+        <button className={tab === 'smtp' ? 'selected' : ''} onClick={() => setTab('smtp')}>SMTP</button>
+        <button className={tab === 'telegram' ? 'selected' : ''} onClick={() => setTab('telegram')}>Telegram</button>
         <button className={tab === 'system' ? 'selected' : ''} onClick={() => setTab('system')}>Sistema</button>
       </div>
       {tab === 'users' && <UsersPanel api={api} />}
+      {tab === 'smtp' && <SMTPSettings api={api} />}
+      {tab === 'telegram' && <TelegramSettings api={api} />}
       {tab === 'system' && <SystemPanel api={api} />}
     </section>
   );

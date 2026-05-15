@@ -28,6 +28,7 @@ type Config struct {
 	ServiceChecksCSV     string   `json:"-"`
 	InsecureSkipTLS      bool     `json:"insecure_skip_tls,omitempty"`
 	StatusListenAddr     string   `json:"status_listen_addr,omitempty"`
+	AllowPublicStatus    bool     `json:"-"`
 	BufferDir            string   `json:"buffer_dir,omitempty"`
 	InventoryFingerprint string   `json:"inventory_fingerprint,omitempty"`
 }
