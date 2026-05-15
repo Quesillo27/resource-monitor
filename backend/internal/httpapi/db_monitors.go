@@ -20,6 +20,9 @@ func (s *Server) listDBTargets(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	for i := range targets {
+		targets[i].DSN = store.MaskDSN(targets[i].DSN)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"targets": targets})
 }
 
@@ -42,6 +45,7 @@ func (s *Server) createDBTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	created.DSN = store.MaskDSN(created.DSN)
 	writeJSON(w, http.StatusCreated, created)
 }
 
@@ -56,6 +60,19 @@ func (s *Server) updateDBTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "type must be postgres or redis", http.StatusBadRequest)
 		return
 	}
+	// If client returned the masked DSN, preserve the original from DB
+	if store.DSNIsMasked(t.DSN) {
+		existing, err := s.store.GetDatabaseTarget(r.Context(), id)
+		if errors.Is(err, store.ErrNotFound) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		t.DSN = existing.DSN
+	}
 	updated, err := s.store.UpdateDatabaseTarget(r.Context(), id, t)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -65,6 +82,7 @@ func (s *Server) updateDBTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	updated.DSN = store.MaskDSN(updated.DSN)
 	writeJSON(w, http.StatusOK, updated)
 }
 

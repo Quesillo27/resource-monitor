@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,6 +18,39 @@ import (
 
 	"github.com/jackc/pgx/v5"
 )
+
+// MaskDSN replaces the password in a DSN with ****. Returns the input unchanged
+// if it cannot be parsed as a URL. For non-URL DSNs (e.g. Redis host:port) returns
+// as-is since they don't carry the password inline.
+func MaskDSN(dsn string) string {
+	if dsn == "" || !strings.Contains(dsn, "://") {
+		return dsn
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.User == nil {
+		return dsn
+	}
+	if _, hasPwd := u.User.Password(); !hasPwd {
+		return dsn
+	}
+	u.User = url.UserPassword(u.User.Username(), "****")
+	return u.String()
+}
+
+// DSNIsMasked returns true if the DSN looks like it came from MaskDSN (password = ****).
+// Used by Update handlers to detect when the client returned the masked value and
+// the original DSN should be preserved.
+func DSNIsMasked(dsn string) bool {
+	if !strings.Contains(dsn, "://") {
+		return false
+	}
+	u, err := url.Parse(dsn)
+	if err != nil || u.User == nil {
+		return false
+	}
+	pwd, hasPwd := u.User.Password()
+	return hasPwd && pwd == "****"
+}
 
 func (s *Store) ensureDBMonitorSchema(ctx context.Context) error {
 	s.onceDBMonitor.Do(func() { s.onceDBMonitorErr = s.runDBMonitorSchema(ctx) })

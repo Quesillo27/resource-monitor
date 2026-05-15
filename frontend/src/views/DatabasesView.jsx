@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Activity, ChevronLeft, Database, Edit3, Plus,
+  Activity, ChevronLeft, Database, Edit3, HelpCircle, Plus,
   Terminal, Trash2, Wifi, WifiOff, Zap,
 } from 'lucide-react';
 import { Header, IconButton, Modal, Panel, RefreshMeta, Skeleton, bytes, round, useLoad } from '../lib/ui';
@@ -93,60 +93,97 @@ function Sparkline({ values = [], width = 72, height = 22, color = '#3b82f6' }) 
 
 // ── LineChart ────────────────────────────────────────────────────────────────
 
-function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, suffix = '' }) {
-  const pts = [...samples].reverse()
-    .map(s => ({ v: s[field] != null ? s[field] * scale : null, t: s.captured_at }))
-    .filter(d => d.v != null);
+function fmtTimeShort(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
 
-  if (pts.length < 2) {
-    return <div className="db-chart-empty">Sin datos suficientes para graficar</div>;
+function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, suffix = '' }) {
+  const [hoverIndex, setHoverIndex] = useState(null);
+
+  const points = useMemo(
+    () => [...samples].reverse()
+      .map(s => ({ v: s[field] != null ? Number(s[field]) * scale : null, t: s.captured_at }))
+      .filter(d => d.v != null),
+    [samples, field, scale]
+  );
+
+  const { yMin, yMax, range } = useMemo(() => {
+    if (points.length === 0) return { yMin: 0, yMax: 1, range: 1 };
+    const vals = points.map(p => p.v);
+    const mn = Math.min(...vals);
+    const mx = Math.max(...vals);
+    // Pad range so the line isn't pinned to edges
+    const span = mx - mn;
+    const pad = span === 0 ? Math.max(1, Math.abs(mx) * 0.1) : span * 0.15;
+    return { yMin: mn - pad, yMax: mx + pad, range: (mx + pad) - (mn - pad) || 1 };
+  }, [points]);
+
+  const fmt = (v) => suffix === '%' ? `${v.toFixed(1)}%` : `${Math.round(v)}${suffix}`;
+
+  const linePath = useMemo(() => {
+    if (points.length < 2) return '';
+    const maxI = points.length - 1;
+    return points.map((p, i) => {
+      const x = (i / maxI) * 100;
+      const y = 48 - ((p.v - yMin) / range) * 40;
+      return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+    }).join('');
+  }, [points, yMin, range]);
+
+  const yTicks = useMemo(
+    () => [1, 0.75, 0.5, 0.25, 0].map(r => fmt(yMin + range * r)),
+    [yMin, range, suffix]
+  );
+
+  const xTicks = useMemo(() => {
+    if (points.length === 0) return [];
+    const maxI = Math.max(points.length - 1, 1);
+    return [0, 0.25, 0.5, 0.75, 1].map(r => points[Math.round(r * maxI)]?.t).filter(Boolean).map(fmtTimeShort);
+  }, [points]);
+
+  if (points.length < 2) {
+    return <div className="empty-chart">Sin historial disponible</div>;
   }
 
-  const W = 500, H = 100;
-  const pl = 34, pr = 6, pt = 6, pb = 18;
-  const iw = W - pl - pr, ih = H - pt - pb;
-  const vals  = pts.map(d => d.v);
-  const min   = Math.min(...vals), max = Math.max(...vals);
-  const range = max - min || 1;
-  const cx = i => pl + (i / (pts.length - 1)) * iw;
-  const cy = v => pt + ih - ((v - min) / range) * ih;
-  const line = pts.map((d, i) => `${i === 0 ? 'M' : 'L'}${cx(i).toFixed(1)},${cy(d.v).toFixed(1)}`).join(' ');
-  const area = `${line} L${cx(pts.length - 1).toFixed(1)},${(pt + ih).toFixed(1)} L${pl},${(pt + ih).toFixed(1)} Z`;
-  const gradId = `dbg-${field}`;
-  const yTicks = [0, 0.5, 1].map(f => {
-    const v = min + f * range;
-    const label = suffix === '%' ? `${v.toFixed(1)}%` : `${Math.round(v)}${suffix}`;
-    return { label, y: cy(v) };
-  });
-  const xIdx = [0, Math.floor((pts.length - 1) / 2), pts.length - 1];
+  const activePoint = hoverIndex === null ? null : points[hoverIndex];
+  const activeX = hoverIndex === null ? 0 : (hoverIndex / (points.length - 1)) * 100;
+  const activeY = activePoint ? 48 - ((activePoint.v - yMin) / range) * 40 : 0;
+
+  const setHover = (e) => {
+    const b = e.currentTarget.getBoundingClientRect();
+    const r = Math.max(0, Math.min(1, (e.clientX - b.left) / b.width));
+    setHoverIndex(Math.round(r * (points.length - 1)));
+  };
 
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="db-line-chart" aria-label={label}>
-      <defs>
-        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor={color} stopOpacity="0.18"/>
-          <stop offset="100%" stopColor={color} stopOpacity="0.02"/>
-        </linearGradient>
-      </defs>
-      {yTicks.map(({ y }, i) => (
-        <line key={i} x1={pl} y1={y} x2={W - pr} y2={y} stroke="#e2e8f0" strokeWidth="0.5" strokeDasharray="3,2"/>
-      ))}
-      <path d={area} fill={`url(#${gradId})`}/>
-      <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-      {pts.length <= 30 && pts.map((d, i) => (
-        <circle key={i} cx={cx(i)} cy={cy(d.v)} r="2" fill={color} opacity="0.7"/>
-      ))}
-      {yTicks.map(({ label, y }, i) => (
-        <text key={i} x={pl - 3} y={y + 3.5} textAnchor="end" fontSize="9" fill="#94a3b8">{label}</text>
-      ))}
-      {xIdx.map(i => pts[i] && (
-        <text key={i} x={cx(i)} y={H - 1}
-          textAnchor={i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}
-          fontSize="9" fill="#94a3b8">
-          {new Date(pts[i].t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </text>
-      ))}
-    </svg>
+    <div className="chart-shell">
+      <div className="legend"><span><i style={{ background: color }} />{label}</span></div>
+      <div className="chart-frame">
+        <div className="chart-axis y-axis">{yTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
+        <div className="chart-plot" onMouseMove={setHover} onMouseLeave={() => setHoverIndex(null)}>
+          <svg className="chart" viewBox="0 0 100 52" preserveAspectRatio="none">
+            <path d="M0 8 H100" /><path d="M0 18 H100" /><path d="M0 28 H100" /><path d="M0 38 H100" /><path d="M0 48 H100" />
+            {activePoint && <line className="chart-cursor" x1={activeX} x2={activeX} y1="8" y2="48" />}
+            <path className="chart-line" d={linePath} style={{ stroke: color, fill: 'none' }} />
+            {activePoint && (
+              <circle cx={activeX} cy={activeY} r="1.4" style={{ fill: color, stroke: 'none' }} />
+            )}
+          </svg>
+          {activePoint && (
+            <div className="chart-tooltip" style={{ left: `${Math.min(Math.max(activeX, 12), 88)}%` }}>
+              <strong>{fmtTimeShort(activePoint.t)}</strong>
+              <span><i style={{ background: color }} />{label}<b>{fmt(activePoint.v)}</b></span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="chart-scale">{xTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
+    </div>
   );
 }
 
@@ -1193,15 +1230,22 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
       {/* ══ HISTORIAL ══ */}
       {tab === 'historial' && (
         <div className="db-tab-content">
-          <div className="db-hint" style={{ marginBottom: 4 }}>
-            Cada fila es una <strong>muestra de polling</strong> — el monitor conecta a la BD, mide sus métricas y las guarda.
-            {' '}<strong>Conexión OK</strong> = logró conectar y recopilar métricas.
-            {' '}<strong>Error</strong> = falló la conexión o hubo un error al consultar (hover para ver el mensaje).
-          </div>
           {samples.length < 2 ? (
             <div className="db-live-empty"><span>Sin muestras históricas aún — el monitor pollea cada {target.poll_interval_seconds}s.</span></div>
           ) : (
-            <Panel title={`Últimas ${Math.min(samples.length, 30)} muestras (polling cada ${target.poll_interval_seconds}s)`}>
+            <Panel title={
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                Últimas {Math.min(samples.length, 30)} muestras (polling cada {target.poll_interval_seconds}s)
+                <span className="db-help-icon" tabIndex={0}>
+                  <HelpCircle size={14}/>
+                  <span className="db-help-pop">
+                    Cada fila es una <strong>muestra de polling</strong> — el monitor conecta a la BD, mide sus métricas y las guarda.
+                    {' '}<strong>Conexión OK</strong> = logró conectar y recopilar métricas.
+                    {' '}<strong>Error</strong> = falló la conexión o hubo un error al consultar (hover sobre el mensaje para ver detalle).
+                  </span>
+                </span>
+              </span>
+            }>
               <div className="db-history-table">
                 <table>
                   <thead>
