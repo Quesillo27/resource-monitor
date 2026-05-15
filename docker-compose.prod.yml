@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    command: postgres -c shared_preload_libraries=pg_stat_statements -c pg_stat_statements.track=all
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-resource_monitor}
       POSTGRES_USER: ${POSTGRES_USER:-resource_monitor}
@@ -38,6 +39,7 @@ services:
     restart: unless-stopped
     networks:
       - internal
+      - dokploy-network
 
   manager-updater:
     image: docker:28-cli
@@ -143,4 +145,7 @@ networks:
   internal:
   resource-monitor:
     name: resource-monitor
+    external: true
+  dokploy-network:
+    name: dokploy-network
     external: true

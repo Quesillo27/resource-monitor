@@ -138,6 +138,7 @@ func (s *Store) DashboardOverview(ctx context.Context, offlineAfterSeconds int) 
 	if heatmap, err := s.dashboardAlertHeatmap(ctx); err == nil {
 		summary["heatmap_24h"] = heatmap
 	}
+	summary["db_summary"] = s.DBTargetsSummary(ctx)
 	return summary, nil
 }
 

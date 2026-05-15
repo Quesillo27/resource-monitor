@@ -34,6 +34,7 @@ func main() {
 	go runRetention(ctx, db, cfg.RetentionDays)
 	go runOfflineAlerts(ctx, db, cfg.OfflineAfterSeconds)
 	go runAlertDispatcher(ctx, db)
+	go runDBMonitor(ctx, db)
 
 	srv := &http.Server{
 		Addr:              cfg.ServerAddr,
@@ -101,6 +102,27 @@ func runAlertDispatcher(ctx context.Context, db *store.Store) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+func runDBMonitor(ctx context.Context, db *store.Store) {
+	// Espera breve para que el pool de pgx se caliente antes del primer poll.
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(10 * time.Second):
+	}
+	db.PollAllDatabaseTargets(ctx)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			db.PollAllDatabaseTargets(ctx)
 		}
 	}
 }

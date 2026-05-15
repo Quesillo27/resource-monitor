@@ -277,3 +277,154 @@ type InventoryResponse struct {
 	Hardware *HardwareSnapshot `json:"hardware,omitempty"`
 	Software []SoftwareItem    `json:"software"`
 }
+
+type DatabaseTarget struct {
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Type                string            `json:"type"` // postgres, redis
+	DSN                 string            `json:"dsn"`
+	Params              map[string]string `json:"params,omitempty"`
+	Enabled             bool              `json:"enabled"`
+	PollIntervalSeconds int               `json:"poll_interval_seconds"`
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
+	LastOK              *bool             `json:"last_ok,omitempty"`
+	LastError           string            `json:"last_error,omitempty"`
+	LastSampleAt        *time.Time        `json:"last_sample_at,omitempty"`
+	Sparkline           []int             `json:"sparkline,omitempty"`
+}
+
+type DatabaseSample struct {
+	ID                     int64     `json:"id"`
+	TargetID               string    `json:"target_id"`
+	CapturedAt             time.Time `json:"captured_at"`
+	OK                     bool      `json:"ok"`
+	ErrorMessage           string    `json:"error_message,omitempty"`
+	ConnectionsActive      *int      `json:"connections_active,omitempty"`
+	ConnectionsIdle        *int      `json:"connections_idle,omitempty"`
+	ConnectionsWaiting     *int      `json:"connections_waiting,omitempty"`
+	ConnectionsTotal       *int      `json:"connections_total,omitempty"`
+	DBSizeBytes            *int64    `json:"db_size_bytes,omitempty"`
+	SlowQueries            *int      `json:"slow_queries,omitempty"`
+	ActiveLocks            *int      `json:"active_locks,omitempty"`
+	CacheHitRatio          *float64  `json:"cache_hit_ratio,omitempty"`
+	TransactionsCommitted  *int64    `json:"transactions_committed,omitempty"`
+	TransactionsRolledBack *int64    `json:"transactions_rolled_back,omitempty"`
+	MemoryUsedBytes        *int64    `json:"memory_used_bytes,omitempty"`
+	MemoryMaxBytes         *int64    `json:"memory_max_bytes,omitempty"`
+	ConnectedClients       *int      `json:"connected_clients,omitempty"`
+	OpsPerSec              *float64  `json:"ops_per_sec,omitempty"`
+	KeyspaceHits           *int64    `json:"keyspace_hits,omitempty"`
+	KeyspaceMisses         *int64    `json:"keyspace_misses,omitempty"`
+}
+
+type PGLiveInfo struct {
+	Version        string          `json:"version"`
+	StartedAt      string          `json:"started_at"`
+	UptimeSeconds  int64           `json:"uptime_seconds"`
+	MaxConnections int             `json:"max_connections"`
+	DBName         string          `json:"db_name"`
+	Databases      []DBSize        `json:"databases"`
+	XidAge         int64           `json:"xid_age"`
+	OldestXactMs   int64           `json:"oldest_xact_ms"`
+	Checkpoints    CheckpointStats `json:"checkpoints"`
+	Sequences      []SequenceInfo  `json:"sequences,omitempty"`
+}
+
+type CheckpointStats struct {
+	Timed          int64 `json:"timed"`
+	Requested      int64 `json:"requested"`
+	BuffersClean   int64 `json:"buffers_clean"`
+	BuffersBackend int64 `json:"buffers_backend"`
+}
+
+type SequenceInfo struct {
+	Schema  string  `json:"schema"`
+	Name    string  `json:"name"`
+	Current int64   `json:"current"`
+	Max     int64   `json:"max"`
+	PctUsed float64 `json:"pct_used"`
+}
+
+type DBSize struct {
+	Name  string `json:"name"`
+	Bytes int64  `json:"bytes"`
+}
+
+type ActiveQuery struct {
+	PID           int    `json:"pid"`
+	State         string `json:"state"`
+	Query         string `json:"query"`
+	DurationMs    int64  `json:"duration_ms"`
+	WaitEvent     string `json:"wait_event,omitempty"`
+	AppName       string `json:"app_name,omitempty"`
+	UserName      string `json:"user_name,omitempty"`
+	ClientAddr    string `json:"client_addr,omitempty"`
+	Database      string `json:"database,omitempty"`
+	BackendAgeMs  int64  `json:"backend_age_ms,omitempty"`
+}
+
+type TableSize struct {
+	Schema     string `json:"schema"`
+	Table      string `json:"table"`
+	TotalBytes int64  `json:"total_bytes"`
+	TableBytes int64  `json:"table_bytes"`
+	IndexBytes int64  `json:"index_bytes"`
+}
+
+type VacuumStat struct {
+	Schema       string  `json:"schema"`
+	Table        string  `json:"table"`
+	LiveTuples   int64   `json:"live_tuples"`
+	DeadTuples   int64   `json:"dead_tuples"`
+	BloatPct     float64 `json:"bloat_pct"`
+	LastVacuum   string  `json:"last_vacuum,omitempty"`
+	LastAnalyze  string  `json:"last_analyze,omitempty"`
+	VacuumCount  int64   `json:"vacuum_count"`
+	AnalyzeCount int64   `json:"analyze_count"`
+}
+
+type IndexUsage struct {
+	Schema    string `json:"schema"`
+	Table     string `json:"table"`
+	Index     string `json:"index"`
+	Scans     int64  `json:"scans"`
+	SizeBytes int64  `json:"size_bytes"`
+	IsUnique  bool   `json:"is_unique"`
+}
+
+type SlowQuery struct {
+	Query       string  `json:"query"`
+	Calls       int64   `json:"calls"`
+	TotalMs     float64 `json:"total_ms"`
+	MeanMs      float64 `json:"mean_ms"`
+	MaxMs       float64 `json:"max_ms"`
+	Rows        int64   `json:"rows"`
+	CacheHitPct float64 `json:"cache_hit_pct"`
+}
+
+type RedisLiveInfo struct {
+	FragRatio      float64         `json:"frag_ratio"`
+	EvictedKeys    int64           `json:"evicted_keys"`
+	ExpiredKeys    int64           `json:"expired_keys"`
+	BlockedClients int             `json:"blocked_clients"`
+	UptimeSeconds  int64           `json:"uptime_seconds"`
+	Role           string          `json:"role"`
+	Keyspace       []RedisKeyspace `json:"keyspace"`
+}
+
+type RedisKeyspace struct {
+	DB      string `json:"db"`
+	Keys    int64  `json:"keys"`
+	Expires int64  `json:"expires"`
+}
+
+type PGReplicaInfo struct {
+	AppName     string `json:"app_name"`
+	ClientAddr  string `json:"client_addr"`
+	State       string `json:"state"`
+	SyncState   string `json:"sync_state"`
+	ReplayLagMs int64  `json:"replay_lag_ms"`
+	SentLagKB   int64  `json:"sent_lag_kb"`
+	ApplyLagKB  int64  `json:"apply_lag_kb"`
+}

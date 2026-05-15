@@ -8,6 +8,7 @@ import {
   Clock,
   Copy,
   Cpu,
+  Database,
   Download,
   Edit3,
   Eye,
@@ -57,6 +58,7 @@ const Enrollment = lazy(() => import('./views/Enrollment'));
 const SettingsPage = lazy(() => import('./views/SettingsPage'));
 const AlertsCenter = lazy(() => import('./views/AlertsCenter'));
 const AgentDetail = lazy(() => import('./views/AgentDetail'));
+const DatabasesView = lazy(() => import('./views/DatabasesView'));
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 const REFRESH_MS       = 60_000; // overview + alertas
@@ -98,6 +100,7 @@ function Shell({ token, view, setView, onLogout }) {
   const baseNav = [
     ['dashboard', LayoutDashboard, 'Dashboard'],
     ['agents', Server, 'Equipos'],
+    ['databases', Database, 'Bases de datos'],
     ['enroll', KeyRound, 'Alta agente'],
     ['alerts', ShieldAlert, 'Alertas'],
     ['settings', Settings, 'Configuración'],
@@ -142,6 +145,7 @@ function Shell({ token, view, setView, onLogout }) {
         <Suspense fallback={<div className="lazy-fallback">Cargando…</div>}>
           {view === 'dashboard' && <Dashboard api={api} navigateTo={navigateTo} />}
           {view === 'agents' && (selectedAgent ? <AgentDetail api={api} agentId={selectedAgent} onBack={() => setSelectedAgent(null)} /> : <Agents api={api} onSelect={setSelectedAgent} initialFilter={agentsInitialFilter} />)}
+          {view === 'databases' && <DatabasesView api={api} />}
           {view === 'enroll' && <Enrollment api={api} />}
           {view === 'alerts' && <AlertsCenter api={api} />}
           {view === 'settings' && isAdmin && <SettingsPage api={api} />}
@@ -198,6 +202,7 @@ function Dashboard({ api, navigateTo }) {
   const capacity = overview.capacity || {};
   const osDist = overview.os_distribution || {};
   const heatmap = overview.heatmap_24h || [];
+  const dbSummary = overview.db_summary || {};
   const availableTags = tagsData?.tags || [];
 
   const filterByTag = (list) => {
@@ -267,6 +272,9 @@ function Dashboard({ api, navigateTo }) {
         <KpiClick icon={MemoryStick} label="RAM promedio" value={`${round(stats.avg_memory_percent)}%`} sparkline={trends.memory} sparkColor="#a855f7" />
         <KpiClick icon={HardDrive} label="Discos críticos" value={stats.critical_disks ?? 0} tone="bad" onClick={() => navigateTo('alerts')} />
         <KpiClick icon={Settings} label="Servicios caídos" value={stats.services_down ?? 0} tone="bad" onClick={() => navigateTo('alerts')} />
+        {dbSummary.total > 0 && (
+          <KpiClick icon={Database} label="BD con error" value={dbSummary.error ?? 0} tone={dbSummary.error > 0 ? 'bad' : 'good'} onClick={() => navigateTo('databases')} />
+        )}
       </div>
 
       <div className="dashboard-grid">
@@ -288,6 +296,14 @@ function Dashboard({ api, navigateTo }) {
           <Heatmap buckets={heatmap} />
         </Panel>
       </div>
+
+      {dbSummary.total > 0 && (
+        <div className="dashboard-grid">
+          <Panel title="Bases de datos monitoreadas">
+            <DBSummaryPanel summary={dbSummary} onNavigate={() => navigateTo('databases')} />
+          </Panel>
+        </div>
+      )}
     </section>
   );
 }
@@ -303,6 +319,49 @@ function KpiClick({ icon: Icon, label, value, tone = '', sparkline, sparkColor =
         <div className="kpi-spark"><Sparkline points={sparkline} color={sparkColor} width={120} height={28} /></div>
       )}
     </Tag>
+  );
+}
+
+function DBSummaryPanel({ summary, onNavigate }) {
+  const total   = summary.total || 0;
+  const ok      = summary.ok || 0;
+  const err     = summary.error || 0;
+  const noData  = (summary.enabled || 0) - ok - err;
+  const pgCount = summary.pg_count || 0;
+  const rdCount = summary.redis_count || 0;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{total}</div>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 3 }}>Total</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, color: '#15803d', lineHeight: 1 }}>{ok}</div>
+          <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 3 }}>OK</div>
+        </div>
+        {err > 0 && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#b91c1c', lineHeight: 1 }}>{err}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 3 }}>Error</div>
+          </div>
+        )}
+        {noData > 0 && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: '#94a3b8', lineHeight: 1 }}>{noData}</div>
+            <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', marginTop: 3 }}>Sin datos</div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginLeft: 8 }}>
+        {pgCount > 0 && <span style={{ padding: '3px 10px', borderRadius: 5, background: '#dbeafe', color: '#1e40af', fontSize: 12, fontWeight: 700 }}>PostgreSQL ×{pgCount}</span>}
+        {rdCount > 0 && <span style={{ padding: '3px 10px', borderRadius: 5, background: '#fee2e2', color: '#991b1b', fontSize: 12, fontWeight: 700 }}>Redis ×{rdCount}</span>}
+      </div>
+      <button onClick={onNavigate} style={{ marginLeft: 'auto', padding: '6px 14px', borderRadius: 7, border: '1.5px solid #e2e8f0', background: '#f8fafc', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#475569' }}>
+        Ver detalle →
+      </button>
+    </div>
   );
 }
 

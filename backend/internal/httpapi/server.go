@@ -124,6 +124,23 @@ func (s *Server) Routes() http.Handler {
 			r.With(s.requireRole("admin")).Get("/manager/version", s.managerVersion)
 			r.With(s.requireRole("admin")).Get("/manager/update/status", s.managerUpdateStatus)
 			r.With(s.requireRole("admin")).Post("/manager/update", s.managerUpdateTrigger)
+
+			// Database monitoring
+			r.Get("/db-targets", s.listDBTargets)
+			r.With(s.requireRole("admin", "operator")).Post("/db-targets", s.createDBTarget)
+			r.With(s.requireRole("admin", "operator")).Put("/db-targets/{id}", s.updateDBTarget)
+			r.With(s.requireRole("admin", "operator")).Delete("/db-targets/{id}", s.deleteDBTarget)
+			r.Get("/db-targets/{id}/metrics", s.getDBMetrics)
+			r.Get("/db-targets/{id}/info", s.getDBLiveInfo)
+			r.Get("/db-targets/{id}/active-queries", s.getDBActiveQueries)
+			r.Get("/db-targets/{id}/table-sizes", s.getDBTableSizes)
+			r.With(s.requireRole("admin", "operator")).Post("/db-targets/test", s.testDBConnection)
+			r.Get("/db-targets/{id}/vacuum-stats", s.getDBVacuumStats)
+			r.Get("/db-targets/{id}/index-usage", s.getDBIndexUsage)
+			r.Get("/db-targets/{id}/slow-queries", s.getDBSlowQueries)
+			r.Get("/db-targets/{id}/redis-live", s.getDBRedisLive)
+			r.Get("/db-targets/{id}/replication", s.getDBReplication)
+			r.With(s.requireRole("admin", "operator")).Post("/db-targets/poll", s.pollDBTarget)
 		})
 
 		r.Post("/agent/register", s.registerAgent)

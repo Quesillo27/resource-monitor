@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -39,6 +40,8 @@ type Store struct {
 	onceAlertContextErr    error
 	onceNetworkIface       sync.Once
 	onceNetworkIfaceErr    error
+	onceDBMonitor          sync.Once
+	onceDBMonitorErr       error
 }
 
 type User struct {
@@ -84,6 +87,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		store.ensureAlertRulesSchema,
 		store.ensureAlertContextSchema,
 		store.ensureNetworkInterfaceSchema,
+		store.ensureDBMonitorSchema,
 	} {
 		if err := migrate(ctx); err != nil {
 			pool.Close()
@@ -671,8 +675,19 @@ func (s *Store) DeleteOldMetrics(ctx context.Context, days int) error {
 	if days <= 0 {
 		days = 30
 	}
-	_, err := s.pool.Exec(ctx, "DELETE FROM metric_samples WHERE captured_at < now() - ($1::int * interval '1 day')", days)
-	return err
+	if _, err := s.pool.Exec(ctx, "DELETE FROM metric_samples WHERE captured_at < now() - ($1::int * interval '1 day')", days); err != nil {
+		return err
+	}
+	// DB samples — same window; table may not exist yet, ignore that error.
+	_, dbErr := s.pool.Exec(ctx, "DELETE FROM db_samples WHERE captured_at < now() - ($1::int * interval '1 day')", days)
+	if dbErr != nil && !isUndefinedTable(dbErr) {
+		log.Printf("db_samples retention: %v", dbErr)
+	}
+	return nil
+}
+
+func isUndefinedTable(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "undefined_table"))
 }
 
 func (s *Store) latestDisks(ctx context.Context, agentID string) ([]models.DiskMetric, error) {
