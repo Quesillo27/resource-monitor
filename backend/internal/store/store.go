@@ -525,7 +525,11 @@ func (s *Store) AgentDetail(ctx context.Context, id string, offlineAfterSeconds 
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"agent": agent, "disks": disks, "networks": networks, "processes": processes, "services": services}, nil
+	temperatures, err := s.latestTemperatures(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"agent": agent, "disks": disks, "networks": networks, "processes": processes, "services": services, "temperatures": temperatures}, nil
 }
 
 func (s *Store) UpdateAgentName(ctx context.Context, id, name string) error {
@@ -709,7 +713,7 @@ func (s *Store) latestProcesses(ctx context.Context, agentID string) ([]models.P
 			ORDER BY captured_at DESC LIMIT 1
 		)
 		ORDER BY cpu_percent DESC, memory_percent DESC
-		LIMIT 5
+		LIMIT 50
 	`, agentID)
 	if err != nil {
 		return nil, err
@@ -751,6 +755,31 @@ func (s *Store) latestServices(ctx context.Context, agentID string) ([]models.Sv
 		services = append(services, service)
 	}
 	return services, rows.Err()
+}
+
+func (s *Store) latestTemperatures(ctx context.Context, agentID string) ([]models.TempMetric, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (sensor_key)
+		       sensor_key, temperature_c
+		FROM temperature_samples
+		WHERE agent_id = $1
+		  AND captured_at > now() - interval '1 hour'
+		ORDER BY sensor_key, captured_at DESC
+	`, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	temps := []models.TempMetric{}
+	for rows.Next() {
+		var t models.TempMetric
+		if err := rows.Scan(&t.SensorKey, &t.TemperatureC); err != nil {
+			return nil, err
+		}
+		temps = append(temps, t)
+	}
+	return temps, rows.Err()
 }
 
 func evaluateAlerts(ctx context.Context, tx pgx.Tx, agentID string, req models.MetricsRequest) (string, map[string]bool, error) {

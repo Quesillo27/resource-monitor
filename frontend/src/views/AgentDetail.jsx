@@ -689,9 +689,14 @@ function ServicesTab({ api, agentId, services }) {
   );
 }
 
-function HardwareTab({ hardware, onRefresh }) {
-  if (!hardware) return <EmptyState icon="🖥️" title="Sin datos de hardware" subtitle="El agente enviará el inventario de hardware en su próxima sincronización (24h)." />;
-  const rows = [
+function TempBadge({ value }) {
+  const tone = value >= 80 ? 'bad' : value >= 60 ? 'warn' : 'ok';
+  return <span className={`svc-state ${tone}`}>{value.toFixed(1)} °C</span>;
+}
+
+function HardwareTab({ hardware, temperatures = [], onRefresh }) {
+  if (!hardware && temperatures.length === 0) return <EmptyState icon="🖥️" title="Sin datos de hardware" subtitle="El agente enviará el inventario de hardware en su próxima sincronización (24h)." />;
+  const rows = hardware ? [
     ['CPU', hardware.cpu_model || '—'],
     ['Fabricante', hardware.cpu_vendor || '—'],
     ['Núcleos físicos', hardware.cpu_cores_physical || '—'],
@@ -702,7 +707,7 @@ function HardwareTab({ hardware, onRefresh }) {
     ['Kernel', hardware.kernel_version || '—'],
     ['Virtualización', hardware.virtualization || 'Ninguna detectada'],
     ['Capturado', hardware.captured_at ? new Date(hardware.captured_at).toLocaleString() : '—'],
-  ];
+  ] : [];
   return (
     <div>
       {onRefresh && (
@@ -710,14 +715,26 @@ function HardwareTab({ hardware, onRefresh }) {
           <IconButton icon={RefreshCw} onClick={onRefresh} label="Actualizar inventario" />
         </div>
       )}
-      <div className="hw-grid">
-        {rows.map(([label, value]) => (
-          <div key={label} className="hw-row">
-            <span className="hw-label">{label}</span>
-            <span className="hw-value">{value}</span>
-          </div>
-        ))}
-      </div>
+      {rows.length > 0 && (
+        <div className="hw-grid">
+          {rows.map(([label, value]) => (
+            <div key={label} className="hw-row">
+              <span className="hw-label">{label}</span>
+              <span className="hw-value">{value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {temperatures.length > 0 && (
+        <div style={{ marginTop: rows.length > 0 ? 24 : 0 }}>
+          <h3 style={{ marginBottom: 10, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.6 }}>Temperaturas</h3>
+          <DataTable
+            empty="Sin lecturas de temperatura"
+            columns={['Sensor', 'Temperatura']}
+            rows={temperatures.map((t) => [t.sensor_key, <TempBadge value={t.temperature_c} />])}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -1285,6 +1302,7 @@ export default function AgentDetail({ api, agentId, onBack }) {
   const networks = useMemo(() => [...(data?.networks || [])].sort((a, b) => (a.up ? 0 : 1) - (b.up ? 0 : 1)), [data?.networks]);
   const processes = useMemo(() => [...(data?.processes || [])].sort((a, b) => (Number(b.cpu_percent || 0) + Number(b.memory_percent || 0)) - (Number(a.cpu_percent || 0) + Number(a.memory_percent || 0))), [data?.processes]);
   const services = useMemo(() => [...(data?.services || [])].sort((a, b) => (a.status === 'running' ? 0 : 1) - (b.status === 'running' ? 0 : 1)), [data?.services]);
+  const temperatures = useMemo(() => [...(data?.temperatures || [])].sort((a, b) => a.sensor_key.localeCompare(b.sensor_key)), [data?.temperatures]);
   const alerts = data?.alerts || [];
   async function renameAgent() {
     const nextName = window.prompt('Nuevo nombre del equipo', agent?.name || '');
@@ -1310,19 +1328,30 @@ export default function AgentDetail({ api, agentId, onBack }) {
         <>
           <div className="detail-head"><Status status={agent.status} /><span>{data.status_reason}</span><span>{agent.hostname}</span><span>{agent.os}</span><span>{agent.arch}</span>{agent.primary_ip && <span>{agent.primary_ip}</span>}</div>
           <AgentTags api={api} agentId={agentId} initialTags={agent.tags || []} />
-          <div className="tab-row">
-            {['summary', 'resources', 'disks', 'network', 'processes', 'services', 'alerts', 'rules', 'hardware', 'software'].map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
-          </div>
-          {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} history={historyData} />}
-          {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
-          {tab === 'disks' && <DisksTable disks={disks} />}
-          {tab === 'network' && <NetworkTab api={api} agentId={agentId} fallbackNetworks={networks} />}
-          {tab === 'processes' && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
-          {tab === 'services' && <ServicesTab api={api} agentId={agentId} services={services} />}
-          {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
-          {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} disks={disks} />}
-          {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} onRefresh={reloadInventory} />}
-          {tab === 'software' && <SoftwareTab software={inventory?.software} onRefresh={reloadInventory} />}
+          {(() => {
+            const profile = agent?.profile || 'balanced';
+            const hasNetwork = profile !== 'minimal';
+            const hasProcesses = profile !== 'minimal';
+            const hasServices = profile !== 'minimal';
+            const allTabs = ['summary', 'resources', 'disks', ...(hasNetwork ? ['network'] : []), ...(hasProcesses ? ['processes'] : []), ...(hasServices ? ['services'] : []), 'alerts', 'rules', 'hardware', 'software'];
+            return (
+              <>
+                <div className="tab-row">
+                  {allTabs.map((item) => <button key={item} className={tab === item ? 'selected' : ''} onClick={() => setTab(item)}>{tabLabel(item)}</button>)}
+                </div>
+                {tab === 'summary' && <SummaryTab agent={agent} status={data.agent_status} disks={disks} networks={networks} services={services} alerts={alerts} history={historyData} />}
+                {tab === 'resources' && <ResourcesTab agent={agent} history={historyData} historyLoading={historyLoading} disks={disks} networks={networks} range={range} setRange={setRange} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
+                {tab === 'disks' && <DisksTable disks={disks} />}
+                {tab === 'network' && hasNetwork && <NetworkTab api={api} agentId={agentId} fallbackNetworks={networks} />}
+                {tab === 'processes' && hasProcesses && <ProcessesTable processes={processes} isOffline={isOffline} lastSeenAt={lastSeenAt} />}
+                {tab === 'services' && hasServices && <ServicesTab api={api} agentId={agentId} services={services} />}
+                {tab === 'alerts' && <AlertList alerts={alerts} api={api} onChange={reload} />}
+                {tab === 'rules' && <AgentRulesTab api={api} agentId={agentId} disks={disks} />}
+                {tab === 'hardware' && <HardwareTab hardware={inventory?.hardware} temperatures={temperatures} onRefresh={reloadInventory} />}
+                {tab === 'software' && <SoftwareTab software={inventory?.software} onRefresh={reloadInventory} />}
+              </>
+            );
+          })()}
         </>
       )}
     </section>
