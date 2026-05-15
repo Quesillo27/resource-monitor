@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"resource-monitor/backend/internal/models"
@@ -24,6 +25,20 @@ var ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
 
 type Store struct {
 	pool *pgxpool.Pool
+
+	// Schema migration once-guards: DDL runs exactly once at startup, never on hot paths.
+	onceV3Schema           sync.Once
+	onceV3SchemaErr        error
+	onceV31Schema          sync.Once
+	onceV31SchemaErr       error
+	onceV32Schema          sync.Once
+	onceV32SchemaErr       error
+	onceAlertRules         sync.Once
+	onceAlertRulesErr      error
+	onceAlertContext       sync.Once
+	onceAlertContextErr    error
+	onceNetworkIface       sync.Once
+	onceNetworkIfaceErr    error
 }
 
 type User struct {
@@ -60,9 +75,20 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		return nil, err
 	}
 	store := &Store{pool: pool}
-	if err := store.ensureRuntimeSchema(ctx); err != nil {
-		pool.Close()
-		return nil, err
+	// Run all schema migrations sequentially at startup so hot paths never run DDL.
+	for _, migrate := range []func(context.Context) error{
+		store.ensureRuntimeSchema,
+		store.EnsureV3Schema,
+		store.EnsureV31Schema,
+		store.EnsureV32Schema,
+		store.ensureAlertRulesSchema,
+		store.ensureAlertContextSchema,
+		store.ensureNetworkInterfaceSchema,
+	} {
+		if err := migrate(ctx); err != nil {
+			pool.Close()
+			return nil, err
+		}
 	}
 	return store, nil
 }
@@ -849,7 +875,15 @@ func upsertAlert(ctx context.Context, tx pgx.Tx, agentID, alertType, resourceKey
 }
 
 func resolveRecoveredAlerts(ctx context.Context, tx pgx.Tx, agentID string, activeKeys map[string]bool) error {
-	rows, err := tx.Query(ctx, "SELECT id::text, type, resource_key FROM alerts WHERE agent_id = $1 AND active = true", agentID)
+	// agent_offline_minutes es exclusivo de evaluateAgentOfflineAlert — no tocarlo
+	// aquí para evitar contención de locks con esa goroutine.
+	// ORDER BY id garantiza orden consistente de adquisición de locks.
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, type, resource_key
+		FROM alerts
+		WHERE agent_id = $1 AND active = true AND type != 'agent_offline_minutes'
+		ORDER BY id
+	`, agentID)
 	if err != nil {
 		return err
 	}

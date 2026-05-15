@@ -21,6 +21,11 @@ import (
 )
 
 func (s *Store) EnsureV3Schema(ctx context.Context) error {
+	s.onceV3Schema.Do(func() { s.onceV3SchemaErr = s.runV3Schema(ctx) })
+	return s.onceV3SchemaErr
+}
+
+func (s *Store) runV3Schema(ctx context.Context) error {
 	statements := []string{
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS last_notified_at TIMESTAMPTZ",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notification_count INTEGER NOT NULL DEFAULT 0",

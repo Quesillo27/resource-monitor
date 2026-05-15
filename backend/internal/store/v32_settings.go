@@ -20,6 +20,11 @@ import (
 )
 
 func (s *Store) EnsureV32Schema(ctx context.Context) error {
+	s.onceV32Schema.Do(func() { s.onceV32SchemaErr = s.runV32Schema(ctx) })
+	return s.onceV32SchemaErr
+}
+
+func (s *Store) runV32Schema(ctx context.Context) error {
 	statements := []string{
 		"ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'admin'",
 		"ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true",

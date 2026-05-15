@@ -200,6 +200,11 @@ func hideNoisyNetworksTx(ctx context.Context, tx pgx.Tx, agentID string) (int, e
 }
 
 func (s *Store) ensureNetworkInterfaceSchema(ctx context.Context) error {
+	s.onceNetworkIface.Do(func() { s.onceNetworkIfaceErr = s.runNetworkInterfaceSchema(ctx) })
+	return s.onceNetworkIfaceErr
+}
+
+func (s *Store) runNetworkInterfaceSchema(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS network_interfaces (
 			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,

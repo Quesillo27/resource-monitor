@@ -12,6 +12,11 @@ import (
 )
 
 func (s *Store) ensureAlertContextSchema(ctx context.Context) error {
+	s.onceAlertContext.Do(func() { s.onceAlertContextErr = s.runAlertContextSchema(ctx) })
+	return s.onceAlertContextErr
+}
+
+func (s *Store) runAlertContextSchema(ctx context.Context) error {
 	_, err := s.pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS alert_process_snapshots (
 			alert_id UUID NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,

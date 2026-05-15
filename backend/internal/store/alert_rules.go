@@ -27,6 +27,11 @@ const (
 const advisoryLockAlertRulesSchema int64 = 7591
 
 func (s *Store) ensureAlertRulesSchema(ctx context.Context) error {
+	s.onceAlertRules.Do(func() { s.onceAlertRulesErr = s.runAlertRulesSchema(ctx) })
+	return s.onceAlertRulesErr
+}
+
+func (s *Store) runAlertRulesSchema(ctx context.Context) error {
 	statements := []string{
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS rule_id UUID",
 		"ALTER TABLE alerts ADD COLUMN IF NOT EXISTS observed_value DOUBLE PRECISION",

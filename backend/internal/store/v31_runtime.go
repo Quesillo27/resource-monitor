@@ -107,14 +107,14 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 	}
 	// Solo actualizar profile si el agente lo envió — agentes viejos no lo mandan
 	// y no deben sobreescribir el perfil configurado manualmente desde la UI.
-	var err error
 	if req.Profile != "" {
-		_, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now(), profile = $3 WHERE id = $1", agentID, status, req.Profile)
+		if _, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now(), profile = $3 WHERE id = $1", agentID, status, req.Profile); err != nil {
+			return err
+		}
 	} else {
-		_, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1", agentID, status)
-	}
-	if err != nil {
-		return err
+		if _, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1", agentID, status); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }
@@ -289,6 +289,11 @@ func (s *Store) SafeAgentNameV31(ctx context.Context, id string) (string, error)
 }
 
 func (s *Store) EnsureV31Schema(ctx context.Context) error {
+	s.onceV31Schema.Do(func() { s.onceV31SchemaErr = s.runV31Schema(ctx) })
+	return s.onceV31SchemaErr
+}
+
+func (s *Store) runV31Schema(ctx context.Context) error {
 	statements := []string{
 		`CREATE TABLE IF NOT EXISTS temperature_samples (
 			id BIGSERIAL PRIMARY KEY,
