@@ -73,6 +73,20 @@ else
   ok ".env actualizado (RM_REPO_DIR=${CURRENT_DIR})."
 fi
 
+info "Instalando comando 'resource-monitor' en /usr/local/bin/..."
+INSTALL_DIR="$(pwd)"
+cat > /tmp/resource-monitor-cli <<WRAPPER
+#!/usr/bin/env bash
+# Wrapper generado por install.sh — apunta al directorio de instalación
+REPO_DIR="${INSTALL_DIR}"
+exec docker compose -f "\${REPO_DIR}/docker-compose.yml" "\$@"
+WRAPPER
+if mv /tmp/resource-monitor-cli /usr/local/bin/resource-monitor && chmod +x /usr/local/bin/resource-monitor; then
+  ok "Comando 'resource-monitor' instalado."
+else
+  warn "No se pudo instalar en /usr/local/bin/ (sin permisos). Usa 'docker compose' desde ${INSTALL_DIR}."
+fi
+
 info "Construyendo y levantando contenedores (1-3 min la primera vez)..."
 docker compose up -d --build
 
@@ -106,6 +120,14 @@ printf "  %bURL:%b      http://localhost:3000\n"  "$C_BOLD" "$C_RESET"
 printf "  %bUsuario:%b  %s\n"                     "$C_BOLD" "$C_RESET" "$ADMIN_USER"
 printf "  %bPassword:%b %s\n"                     "$C_BOLD" "$C_RESET" "$ADMIN_PASS"
 printf "\n"
-printf "  Para detener:   docker compose down\n"
-printf "  Para logs:      docker compose logs -f backend\n"
+if command -v resource-monitor >/dev/null 2>&1; then
+  printf "  %bComandos útiles:%b\n" "$C_BOLD" "$C_RESET"
+  printf "    resource-monitor ps              # estado de contenedores\n"
+  printf "    resource-monitor logs -f backend # logs en vivo\n"
+  printf "    resource-monitor down            # detener todo\n"
+  printf "    resource-monitor up -d           # iniciar\n"
+else
+  printf "  Para detener:   cd %s && docker compose down\n" "$INSTALL_DIR"
+  printf "  Para logs:      cd %s && docker compose logs -f backend\n" "$INSTALL_DIR"
+fi
 printf "\n"
