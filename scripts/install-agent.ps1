@@ -34,21 +34,16 @@ if ($DownloadUrl -ne "") {
 
 $installDir = Join-Path $env:ProgramFiles "ResourceMonitorAgent"
 $installPath = Join-Path $installDir "resource-monitor-agent.exe"
+$tmpPath = Join-Path $env:TEMP "resource-monitor-agent-new.exe"
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-
-$svc = Get-Service resource-monitor-agent -ErrorAction SilentlyContinue
-if ($svc) {
-  Write-Host "Deteniendo servicio existente..."
-  Stop-Service resource-monitor-agent -Force -ErrorAction SilentlyContinue
-  Start-Sleep -Seconds 2
-}
 
 $assetUrl = "$baseUrl/resource-monitor-agent-windows-amd64.exe"
 if ($AgentUrl -ne "") { $assetUrl = $AgentUrl }
 
+# Descargar a archivo temporal ANTES de detener el servicio
 Write-Host "Descargando agente desde $assetUrl..."
 try {
-  Invoke-WebRequest -Uri $assetUrl -OutFile $installPath -UseBasicParsing -TimeoutSec 60
+  Invoke-WebRequest -Uri $assetUrl -OutFile $tmpPath -UseBasicParsing -TimeoutSec 60
 } catch {
   $msg = $_.Exception.Message
   Write-Host ""
@@ -63,16 +58,16 @@ try {
   throw "Descarga fallida: $msg"
 }
 
-# Verify SHA256 checksum if checksums.txt is available
+# Verificar checksum ANTES de detener el servicio
 $checksumUrl = "$baseUrl/checksums.txt"
 try {
   $checksumContent = (Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing -TimeoutSec 10).Content
   $expectedLine = ($checksumContent -split "`n") | Where-Object { $_ -match "resource-monitor-agent-windows-amd64\.exe$" }
   if ($expectedLine) {
     $expected = ($expectedLine -split "\s+")[0].Trim()
-    $actual = (Get-FileHash -Path $installPath -Algorithm SHA256).Hash.ToLower()
+    $actual = (Get-FileHash -Path $tmpPath -Algorithm SHA256).Hash.ToLower()
     if ($expected -ne $actual) {
-      Remove-Item $installPath -Force
+      Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue
       throw "Checksum incorrecto. Esperado: $expected  Obtenido: $actual"
     }
     Write-Host "Checksum OK."
@@ -80,6 +75,16 @@ try {
 } catch [System.Net.WebException] {
   # checksums.txt no disponible — continuar sin verificar
 }
+
+# Detener servicio solo si descarga y checksum pasaron
+$svc = Get-Service resource-monitor-agent -ErrorAction SilentlyContinue
+if ($svc) {
+  Write-Host "Deteniendo servicio existente..."
+  Stop-Service resource-monitor-agent -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
+}
+Copy-Item -Path $tmpPath -Destination $installPath -Force
+Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue
 
 Write-Host "Instalando/actualizando resource-monitor-agent..."
 $installArgs = @("install", "--server-url", $ServerUrl, "--interval", $Interval, "--profile", $Profile)

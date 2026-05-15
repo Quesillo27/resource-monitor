@@ -39,6 +39,7 @@ type Host struct {
 }
 
 type Metrics struct {
+	CapturedAt        *time.Time   `json:"captured_at,omitempty"`
 	CPUPercent        float64      `json:"cpu_percent"`
 	MemoryTotalBytes  uint64       `json:"memory_total_bytes"`
 	MemoryUsedBytes   uint64       `json:"memory_used_bytes"`

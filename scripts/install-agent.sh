@@ -73,10 +73,6 @@ INSTALL_PATH="/usr/local/bin/resource-monitor-agent"
 cleanup() { rm -f "$TMP_BIN"; }
 trap cleanup EXIT
 
-if [[ "$OS" == "Linux" ]]; then
-  systemctl stop resource-monitor-agent 2>/dev/null || true
-fi
-
 DOWNLOAD_ASSET_URL="${BASE_URL}/${ASSET}"
 if [[ -n "$AGENT_URL" ]]; then
   DOWNLOAD_ASSET_URL="$AGENT_URL"
@@ -105,6 +101,9 @@ if curl -fsSL "$CHECKSUM_URL" -o "${TMP_BIN}.checksums" 2>/dev/null; then
   fi
 fi
 
+if [[ "$OS" == "Linux" ]]; then
+  systemctl stop resource-monitor-agent 2>/dev/null || true
+fi
 install -m 0755 "$TMP_BIN" "$INSTALL_PATH"
 
 # SELinux (Rocky, RHEL, CentOS, AlmaLinux, Fedora): restaurar contexto bin_t

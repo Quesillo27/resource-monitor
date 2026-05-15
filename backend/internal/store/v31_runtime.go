@@ -27,12 +27,16 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 
 	var sampleID int64
 	var sampleAt time.Time
+	var capturedAt *time.Time
+	if req.CapturedAt != nil && !req.CapturedAt.IsZero() {
+		capturedAt = req.CapturedAt
+	}
 	err = tx.QueryRow(ctx, `
 		INSERT INTO metric_samples
-			(agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent, swap_total_bytes, swap_used_bytes, swap_used_percent, gateway_latency_ms)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			(agent_id, cpu_percent, memory_total_bytes, memory_used_bytes, memory_used_percent, swap_total_bytes, swap_used_bytes, swap_used_percent, gateway_latency_ms, captured_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($10, now()))
 		RETURNING id, captured_at
-	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent, int64(req.SwapTotalBytes), int64(req.SwapUsedBytes), req.SwapUsedPercent, req.GatewayLatencyMs).Scan(&sampleID, &sampleAt)
+	`, agentID, req.CPUPercent, int64(req.MemoryTotalBytes), int64(req.MemoryUsedBytes), req.MemoryUsedPercent, int64(req.SwapTotalBytes), int64(req.SwapUsedBytes), req.SwapUsedPercent, req.GatewayLatencyMs, capturedAt).Scan(&sampleID, &sampleAt)
 	if err != nil {
 		return err
 	}
@@ -95,10 +99,13 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1", agentID, status); err != nil {
+	// resolveRecoveredAlerts va ANTES de UPDATE agents para mantener el orden
+	// de locks consistente con evaluateAgentOfflineAlert (alerts → agents).
+	// Invertirlo causaba deadlock 40P01 entre ambas goroutines.
+	if err := resolveRecoveredAlerts(ctx, tx, agentID, activeKeys); err != nil {
 		return err
 	}
-	if err := resolveRecoveredAlerts(ctx, tx, agentID, activeKeys); err != nil {
+	if _, err := tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1", agentID, status); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

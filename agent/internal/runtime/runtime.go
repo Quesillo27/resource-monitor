@@ -351,6 +351,8 @@ func bufferLatest(ctx context.Context, cfg config.Config, buf *buffer.Buffer) {
 	if err := buf.Append("heartbeat", info); err != nil {
 		log.Printf("buffer append heartbeat: %v", err)
 	}
+	now := time.Now()
+	metrics.CapturedAt = &now
 	if err := buf.Append("metrics", metrics); err != nil {
 		log.Printf("buffer append metrics: %v", err)
 	}
