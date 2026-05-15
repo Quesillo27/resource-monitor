@@ -105,11 +105,15 @@ func (s *Store) InsertMetricsV31(ctx context.Context, agentID string, req models
 	if err := resolveRecoveredAlerts(ctx, tx, agentID, activeKeys); err != nil {
 		return err
 	}
-	profile := req.Profile
-	if profile == "" {
-		profile = "balanced"
+	// Solo actualizar profile si el agente lo envió — agentes viejos no lo mandan
+	// y no deben sobreescribir el perfil configurado manualmente desde la UI.
+	var err error
+	if req.Profile != "" {
+		_, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now(), profile = $3 WHERE id = $1", agentID, status, req.Profile)
+	} else {
+		_, err = tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now() WHERE id = $1", agentID, status)
 	}
-	if _, err := tx.Exec(ctx, "UPDATE agents SET status = $2, last_seen_at = now(), updated_at = now(), profile = $3 WHERE id = $1", agentID, status, profile); err != nil {
+	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
