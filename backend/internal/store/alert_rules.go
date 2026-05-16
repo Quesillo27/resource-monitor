@@ -58,8 +58,15 @@ func (s *Store) runAlertRulesSchema(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		)`,
 		"ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS notify_telegram BOOLEAN NOT NULL DEFAULT false",
+		// Soporte para alertas sobre DB targets (manager-v1.10.x — F2)
+		"ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS db_target_id UUID REFERENCES db_targets(id) ON DELETE CASCADE",
+		"DROP INDEX IF EXISTS alert_rules_scope_metric_idx",
 		`CREATE UNIQUE INDEX IF NOT EXISTS alert_rules_scope_metric_idx
-			ON alert_rules ((COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)), metric, resource_key, severity)`,
+			ON alert_rules (
+				(COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+				(COALESCE(db_target_id, '00000000-0000-0000-0000-000000000000'::uuid)),
+				metric, resource_key, severity
+			)`,
 		`CREATE TABLE IF NOT EXISTS alert_rule_matches (
 			agent_id UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
 			rule_id UUID NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,

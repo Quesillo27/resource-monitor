@@ -292,6 +292,62 @@ func (s *Server) getDBRedisClients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"clients": clients})
 }
 
+func (s *Server) getDBBlockingLocks(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	locks, err := s.store.GetBlockingLocks(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"locks": locks})
+}
+
+func (s *Server) getDBTableIO(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	io, err := s.store.GetTableIO(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tables": io})
+}
+
+func (s *Server) getDBSettings(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	settings, err := s.store.GetPGSettings(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"settings": settings})
+}
+
+func (s *Server) getDBAutovacuum(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	stats, err := s.store.GetAutovacuumStatus(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, stats)
+}
+
 func (s *Server) getDBInsights(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	insights, err := s.store.GenerateInsights(r.Context(), id)

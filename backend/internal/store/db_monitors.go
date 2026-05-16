@@ -122,6 +122,10 @@ func (s *Store) runDBMonitorSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	// Seed reglas default DB (idempotente). Si falla, no rompe el bootstrap.
+	if err := s.SeedDefaultDBAlertRules(ctx); err != nil {
+		log.Printf("seed db alert rules: %v", err)
+	}
 	return nil
 }
 
@@ -418,9 +422,26 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 			}
 			sample.TargetID = pt.id
 			sample.CapturedAt = time.Now()
+
+			// Cargar el sample anterior antes de insertar (para deltas en alertas)
+			prevSamples, _ := s.GetDatabaseMetrics(ctx, pt.id, 1)
+			var prev *models.DatabaseSample
+			if len(prevSamples) > 0 {
+				prev = &prevSamples[0]
+			}
+
 			if err := s.insertDBSample(ctx, sample); err != nil {
 				log.Printf("db monitor insert (%s): %v", pt.name, err)
+				return
 			}
+
+			// Evaluacion de alertas DB (no bloquea polling de otros targets)
+			target := models.DatabaseTarget{
+				ID:   pt.id,
+				Name: pt.name,
+				Type: pt.dbType,
+			}
+			s.EvaluateDBTargetAlerts(ctx, target, sample, prev)
 		}(t)
 	}
 	wg.Wait()

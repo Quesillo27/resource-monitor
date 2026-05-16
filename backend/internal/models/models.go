@@ -35,6 +35,7 @@ type AgentUpdateRequest struct {
 type AlertRule struct {
 	ID              string   `json:"id,omitempty"`
 	AgentID         *string  `json:"agent_id,omitempty"`
+	DBTargetID      *string  `json:"db_target_id,omitempty"`
 	Metric          string   `json:"metric"`
 	ResourceKey     string   `json:"resource_key"`
 	Severity        string   `json:"severity"`
@@ -387,6 +388,44 @@ type TableSize struct {
 	TotalBytes int64  `json:"total_bytes"`
 	TableBytes int64  `json:"table_bytes"`
 	IndexBytes int64  `json:"index_bytes"`
+}
+
+// BlockingLock representa una sesion bloqueada por otra (usa pg_blocking_pids).
+type BlockingLock struct {
+	BlockedPID    int    `json:"blocked_pid"`
+	BlockedQuery  string `json:"blocked_query"`
+	BlockedUser   string `json:"blocked_user,omitempty"`
+	BlockedApp    string `json:"blocked_app,omitempty"`
+	BlockedTimeMs int64  `json:"blocked_time_ms"`
+	BlockingPID   int    `json:"blocking_pid"`
+	BlockingQuery string `json:"blocking_query"`
+	BlockingUser  string `json:"blocking_user,omitempty"`
+	BlockingApp   string `json:"blocking_app,omitempty"`
+	BlockingState string `json:"blocking_state,omitempty"`
+	WaitEvent     string `json:"wait_event,omitempty"`
+	LockType      string `json:"lock_type,omitempty"`
+	Relation      string `json:"relation,omitempty"`
+}
+
+// TableIO representa I/O por tabla — pg_statio_user_tables.
+type TableIO struct {
+	Schema       string `json:"schema"`
+	Table        string `json:"table"`
+	HeapRead     int64  `json:"heap_read"`
+	HeapHit      int64  `json:"heap_hit"`
+	IdxRead      int64  `json:"idx_read"`
+	IdxHit       int64  `json:"idx_hit"`
+	HitRatioPct  float64 `json:"hit_ratio_pct"`
+}
+
+// PGSetting es una entrada de pg_settings con metadata clave.
+type PGSetting struct {
+	Name      string `json:"name"`
+	Value     string `json:"value"`
+	Unit      string `json:"unit,omitempty"`
+	Category  string `json:"category,omitempty"`
+	ShortDesc string `json:"short_desc,omitempty"`
+	Source    string `json:"source,omitempty"`
 }
 
 type VacuumStat struct {

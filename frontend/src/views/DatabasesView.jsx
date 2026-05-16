@@ -1597,6 +1597,245 @@ function RedisMemoryPanel({ api, targetId }) {
   );
 }
 
+// ── BlockingLocksPanel ────────────────────────────────────────────────────────
+
+function BlockingLocksPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/blocking-locks`),
+    [targetId],
+    LIVE_REFRESH_MS,
+  );
+  const locks = data?.locks || [];
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo cargar locks bloqueantes</div>;
+  if (locks.length === 0) {
+    return (
+      <div className="db-live-empty" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#22c55e' }}/>
+        Sin sesiones bloqueadas en este momento
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <div className="db-live-head"><RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/></div>
+      <div className="db-live-table-wrap">
+        <table className="db-live-table">
+          <thead><tr>
+            <th>Bloqueada</th><th>Esperando</th><th>Tiempo</th>
+            <th>Bloqueada por</th><th>Estado bloqueador</th><th>Lock</th><th>Relación</th>
+          </tr></thead>
+          <tbody>
+            {locks.map((l, i) => (
+              <tr key={i}>
+                <td className="db-col-pid" title={`User: ${l.blocked_user || '—'} · App: ${l.blocked_app || '—'}`}>
+                  PID {l.blocked_pid}
+                </td>
+                <td className="db-col-query" style={{ maxWidth: 280, fontFamily: 'monospace', fontSize: 11 }}
+                    title={l.blocked_query}>{l.blocked_query}</td>
+                <td className="db-col-dur" style={{ color: l.blocked_time_ms > 60000 ? '#dc2626' : '#f59e0b', fontWeight: 700 }}>
+                  {formatDuration(Math.round(l.blocked_time_ms))}
+                </td>
+                <td className="db-col-pid" title={`User: ${l.blocking_user || '—'} · App: ${l.blocking_app || '—'}`}>
+                  PID {l.blocking_pid}
+                </td>
+                <td>
+                  <span className={`db-state-pill ${l.blocking_state === 'active' ? 'st-active' : 'st-idle'}`}>
+                    {l.blocking_state || '—'}
+                  </span>
+                </td>
+                <td style={{ fontSize: 11, color: '#64748b' }}>{l.lock_type || '—'}</td>
+                <td style={{ fontSize: 11, fontFamily: 'monospace' }}>{l.relation || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── TableIOPanel ──────────────────────────────────────────────────────────────
+
+function TableIOPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/table-io`),
+    [targetId],
+    60_000,
+  );
+  const [search, setSearch] = useState('');
+  const tables = data?.tables || [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return tables;
+    return tables.filter(t => `${t.schema}.${t.table}`.toLowerCase().includes(term));
+  }, [tables, search]);
+  const onExport = () => {
+    const rows = [
+      ['schema', 'table', 'heap_read', 'heap_hit', 'idx_read', 'idx_hit', 'hit_ratio_pct'],
+      ...filtered.map(t => [t.schema, t.table, t.heap_read, t.heap_hit, t.idx_read, t.idx_hit, t.hit_ratio_pct.toFixed(2)]),
+    ];
+    downloadCSV(rows, `table-io-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo cargar I/O por tabla</div>;
+  if (tables.length === 0) return <div className="db-live-empty">Sin actividad I/O registrada</div>;
+  return (
+    <div>
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input type="search" placeholder="Filtrar tabla…" value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}/>
+        <span style={{ fontSize: 12, color: '#64748b' }}>{filtered.length} / {tables.length}</span>
+        <button type="button" onClick={onExport} disabled={filtered.length === 0}
+          style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer' }}>
+          Exportar CSV
+        </button>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      <div className="db-live-table-wrap">
+        <table className="db-live-table">
+          <thead><tr>
+            <th>Tabla</th>
+            <th title="Bloques heap leídos del disco">Heap read</th>
+            <th title="Bloques heap servidos desde caché">Heap hit</th>
+            <th title="Bloques de índice leídos del disco">Idx read</th>
+            <th title="Bloques de índice servidos desde caché">Idx hit</th>
+            <th>Hit %</th>
+          </tr></thead>
+          <tbody>
+            {filtered.map((t, i) => (
+              <tr key={i}>
+                <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{t.schema}.{t.table}</td>
+                <td className="db-col-pid" style={{ color: t.heap_read > 100000 ? '#f59e0b' : undefined }}>
+                  {Number(t.heap_read).toLocaleString()}
+                </td>
+                <td className="db-col-pid">{Number(t.heap_hit).toLocaleString()}</td>
+                <td className="db-col-pid">{Number(t.idx_read).toLocaleString()}</td>
+                <td className="db-col-pid">{Number(t.idx_hit).toLocaleString()}</td>
+                <td style={{ color: t.hit_ratio_pct < 90 ? '#dc2626' : t.hit_ratio_pct < 95 ? '#f59e0b' : '#22c55e', fontWeight: 700 }}>
+                  {t.hit_ratio_pct.toFixed(1)}%
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── PGSettingsPanel ───────────────────────────────────────────────────────────
+
+function PGSettingsPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/pg-settings`),
+    [targetId],
+    300_000,
+  );
+  const [search, setSearch] = useState('');
+  const settings = data?.settings || [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return settings;
+    return settings.filter(s => `${s.name} ${s.short_desc} ${s.category}`.toLowerCase().includes(term));
+  }, [settings, search]);
+
+  // Agrupar por category
+  const grouped = useMemo(() => {
+    const m = new Map();
+    for (const s of filtered) {
+      const cat = s.category || 'Otros';
+      if (!m.has(cat)) m.set(cat, []);
+      m.get(cat).push(s);
+    }
+    return Array.from(m.entries());
+  }, [filtered]);
+
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo leer pg_settings</div>;
+  return (
+    <div>
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input type="search" placeholder="Filtrar settings…" value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}/>
+        <span style={{ fontSize: 12, color: '#64748b' }}>{filtered.length} / {settings.length}</span>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {grouped.map(([cat, items]) => (
+          <div key={cat}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+              {cat}
+            </div>
+            <div className="db-live-table-wrap">
+              <table className="db-live-table">
+                <thead><tr><th>Setting</th><th>Valor</th><th>Descripción</th><th>Source</th></tr></thead>
+                <tbody>
+                  {items.map(s => (
+                    <tr key={s.name}>
+                      <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{s.name}</td>
+                      <td style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                        {s.value}{s.unit ? ` ${s.unit}` : ''}
+                      </td>
+                      <td style={{ fontSize: 11, color: '#475569' }}>{s.short_desc || '—'}</td>
+                      <td style={{ fontSize: 10, color: '#64748b' }}>{s.source || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── AutovacuumPanel ───────────────────────────────────────────────────────────
+
+function AutovacuumPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/autovacuum`),
+    [targetId],
+    LIVE_REFRESH_MS,
+  );
+  const workers = data?.workers || [];
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo leer estado de autovacuum</div>;
+  return (
+    <div>
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <span style={{ fontSize: 13 }}>
+          <strong>{workers.length}</strong> {workers.length === 1 ? 'worker corriendo' : 'workers corriendo'}
+        </span>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      {workers.length === 0 ? (
+        <div className="db-live-empty">Sin workers de autovacuum activos en este momento</div>
+      ) : (
+        <div className="db-live-table-wrap">
+          <table className="db-live-table">
+            <thead><tr><th>PID</th><th>Fase</th><th>Relación</th><th>Iniciado</th></tr></thead>
+            <tbody>
+              {workers.map((w, i) => (
+                <tr key={i}>
+                  <td className="db-col-pid">{w.pid}</td>
+                  <td>{w.phase || '—'}</td>
+                  <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{w.relation || '—'}</td>
+                  <td style={{ fontSize: 11, color: '#64748b' }}>{w.started_at ? new Date(w.started_at).toLocaleString() : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ReplicationPanel ──────────────────────────────────────────────────────────
 
 function ReplicationPanel({ api, targetId }) {
@@ -2221,6 +2460,12 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
           <Panel title="Replicación">
             <ReplicationPanel api={api} targetId={target.id}/>
           </Panel>
+          <Panel title="Configuración del servidor">
+            <PGSettingsPanel api={api} targetId={target.id}/>
+          </Panel>
+          <Panel title="Autovacuum">
+            <AutovacuumPanel api={api} targetId={target.id}/>
+          </Panel>
         </div>
       )}
 
@@ -2242,6 +2487,12 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
       {/* ══ DIAGNÓSTICO (PG) ══ */}
       {tab === 'diagnostico' && isPG && (
         <div className="db-tab-content">
+          <Panel title="Locks bloqueantes (pg_blocking_pids)">
+            <BlockingLocksPanel api={api} targetId={target.id}/>
+          </Panel>
+          <Panel title="I/O por tabla (pg_statio_user_tables)">
+            <TableIOPanel api={api} targetId={target.id}/>
+          </Panel>
           <Panel title="Queries más lentas (pg_stat_statements)">
             <SlowQueriesPanel api={api} targetId={target.id}/>
           </Panel>
