@@ -102,6 +102,47 @@ function fmtTimeShort(iso) {
   }
 }
 
+// Enriquece samples con metricas derivadas (TPS, % conexiones, deltas de contadores
+// acumulativos). samples llega ordenado DESC (mas reciente primero); se procesa en
+// orden cronologico ASC para que los deltas tomen sentido.
+function enrichSamples(samples) {
+  if (!Array.isArray(samples) || samples.length === 0) return samples;
+  const asc = [...samples].reverse();
+  const out = [];
+  let prev = null;
+  for (const s of asc) {
+    const e = { ...s };
+    if (prev) {
+      const dt = (new Date(s.captured_at) - new Date(prev.captured_at)) / 1000;
+      if (dt > 0) {
+        if (s.transactions_committed != null && prev.transactions_committed != null &&
+            s.transactions_rolled_back != null && prev.transactions_rolled_back != null) {
+          const totalNow  = Number(s.transactions_committed) + Number(s.transactions_rolled_back);
+          const totalPrev = Number(prev.transactions_committed) + Number(prev.transactions_rolled_back);
+          if (totalNow >= totalPrev) e._tps = (totalNow - totalPrev) / dt;
+          const rb = Number(s.transactions_rolled_back) - Number(prev.transactions_rolled_back);
+          const tot = totalNow - totalPrev;
+          if (tot > 0 && rb >= 0) e._rollback_pct = (rb / tot) * 100;
+        }
+        if (s.deadlocks != null && prev.deadlocks != null) {
+          const d = Number(s.deadlocks) - Number(prev.deadlocks);
+          if (d >= 0) e._deadlocks_delta = d;
+        }
+        if (s.wal_bytes != null && prev.wal_bytes != null) {
+          const w = Number(s.wal_bytes) - Number(prev.wal_bytes);
+          if (w >= 0) e._wal_rate = w / dt;
+        }
+      }
+    }
+    if (s.connections_total != null && s.max_connections != null && s.max_connections > 0) {
+      e._conn_pct = (Number(s.connections_total) / Number(s.max_connections)) * 100;
+    }
+    out.push(e);
+    prev = s;
+  }
+  return out.reverse(); // volver a DESC para que el resto del codigo no cambie
+}
+
 function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, suffix = '' }) {
   const [hoverIndex, setHoverIndex] = useState(null);
 
@@ -1109,7 +1150,7 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
     DB_REFRESH_MS,
   );
   const [tab, setTab] = useState('resumen');
-  const samples = data?.samples || [];
+  const samples = useMemo(() => enrichSamples(data?.samples || []), [data]);
   const latest  = samples[0] || null;
   const isPG    = target.type === 'postgres';
 
@@ -1176,6 +1217,62 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
               <div className="db-chart-mini">
                 <LineChart samples={samples} field="cache_hit_ratio"
                   color="#22c55e" label="Cache hit (%)" scale={100} suffix="%"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => s._tps != null) && (
+            <Panel title="Transacciones por segundo (TPS)">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="_tps"
+                  color="#8b5cf6" label="TPS" suffix="/s"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => s._conn_pct != null) && (
+            <Panel title="% Uso del pool de conexiones">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="_conn_pct"
+                  color="#f59e0b" label="Conexiones / max_connections" suffix="%"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => (s.slow_queries ?? 0) > 0) && (
+            <Panel title="Queries lentas en el tiempo">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="slow_queries"
+                  color="#ef4444" label="Queries activas > 5s"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => s._deadlocks_delta != null && s._deadlocks_delta > 0) && (
+            <Panel title="Deadlocks por intervalo">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="_deadlocks_delta"
+                  color="#dc2626" label="Deadlocks nuevos"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => s.slow_query_p95_ms != null) && (
+            <Panel title="Latencia p95 (pg_stat_statements)">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="slow_query_p95_ms"
+                  color="#0ea5e9" label="p95 mean_exec_time" suffix=" ms"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => s.db_size_bytes != null) && (
+            <Panel title="Tamaño de la base de datos">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="db_size_bytes"
+                  color="#14b8a6" label="DB size" scale={1/(1024*1024)} suffix=" MB"/>
+              </div>
+            </Panel>
+          )}
+          {isPG && samples.some(s => (s.active_locks ?? 0) > 0) && (
+            <Panel title="Locks en espera">
+              <div className="db-chart-mini">
+                <LineChart samples={samples} field="active_locks"
+                  color="#a855f7" label="Locks ungranted"/>
               </div>
             </Panel>
           )}
