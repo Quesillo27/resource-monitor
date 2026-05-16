@@ -1629,6 +1629,75 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
   );
 }
 
+// ── InsightsPanel ─────────────────────────────────────────────────────────────
+
+function severityChip(sev) {
+  const map = {
+    crit: { bg: '#fef2f2', border: '#fecaca', color: '#991b1b', label: 'CRÍTICO' },
+    warn: { bg: '#fffbeb', border: '#fde68a', color: '#92400e', label: 'ATENCIÓN' },
+    info: { bg: '#eff6ff', border: '#bfdbfe', color: '#1e40af', label: 'INFO' },
+  };
+  const s = map[sev] || map.info;
+  return (
+    <span style={{
+      padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+      letterSpacing: '.04em', background: s.bg, border: `1px solid ${s.border}`, color: s.color,
+    }}>{s.label}</span>
+  );
+}
+
+function InsightsPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/insights`),
+    [targetId],
+    300_000, // 5 min — los insights no cambian rápido
+  );
+  const insights = data?.insights || [];
+  if (loading && !data) {
+    return <Panel title="Insights"><Skeleton/></Panel>;
+  }
+  if (!data) {
+    return null; // sin datos suficientes — no llenar la UI con ruidos
+  }
+  return (
+    <Panel title={`Insights${insights.length > 0 ? ` (${insights.length})` : ''}`}
+      action={<RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>}>
+      {insights.length === 0 ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b', fontSize: 13, padding: '6px 2px' }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', background: '#22c55e', display: 'inline-block',
+          }}/>
+          Sin hallazgos relevantes en las métricas recientes.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {insights.map((ins, i) => (
+            <div key={i} style={{
+              padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: 8,
+              background: ins.severity === 'crit' ? '#fef2f2' : ins.severity === 'warn' ? '#fffbeb' : '#f8fafc',
+              borderLeft: `4px solid ${ins.severity === 'crit' ? '#dc2626' : ins.severity === 'warn' ? '#f59e0b' : '#3b82f6'}`,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
+                {severityChip(ins.severity)}
+                <strong style={{ fontSize: 13 }}>{ins.title}</strong>
+              </div>
+              <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.45 }}>{ins.detail}</div>
+              {ins.hint && (
+                <div style={{
+                  marginTop: 6, fontSize: 11, color: '#64748b', fontStyle: 'italic',
+                  borderTop: '1px dashed #cbd5e1', paddingTop: 6,
+                }}>
+                  💡 {ins.hint}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // ── TargetDetail ──────────────────────────────────────────────────────────────
 
 function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
@@ -1696,6 +1765,7 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
       {/* ══ RESUMEN ══ */}
       {tab === 'resumen' && (
         <div className="db-tab-content">
+          <InsightsPanel api={api} targetId={target.id}/>
           <Panel title="Métricas actuales">
             {loading && !latest ? <Skeleton/> : <MetricsCard target={target} sample={latest}/>}
           </Panel>

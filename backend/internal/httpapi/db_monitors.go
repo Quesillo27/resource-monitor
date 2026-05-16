@@ -292,6 +292,20 @@ func (s *Server) getDBRedisClients(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"clients": clients})
 }
 
+func (s *Server) getDBInsights(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	insights, err := s.store.GenerateInsights(r.Context(), id)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"insights": insights})
+}
+
 func (s *Server) getDBRedisMemoryStats(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	stats, err := s.store.GetRedisMemoryStats(r.Context(), id)

@@ -142,6 +142,7 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/db-targets/{id}/redis-slowlog", s.getDBRedisSlowlog)
 			r.Get("/db-targets/{id}/redis-clients", s.getDBRedisClients)
 			r.Get("/db-targets/{id}/redis-memory", s.getDBRedisMemoryStats)
+			r.Get("/db-targets/{id}/insights", s.getDBInsights)
 			r.Get("/db-targets/{id}/replication", s.getDBReplication)
 			r.With(s.requireRole("admin", "operator")).Post("/db-targets/poll", s.pollDBTarget)
 		})
