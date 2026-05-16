@@ -99,6 +99,23 @@ func (s *Store) runDBMonitorSchema(ctx context.Context) error {
 			keyspace_misses BIGINT
 		)`,
 		`CREATE INDEX IF NOT EXISTS db_samples_target_time_idx ON db_samples(target_id, captured_at DESC)`,
+		// Métricas extendidas (Fase A — manager-v1.10.0)
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS deadlocks BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS temp_files BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS temp_bytes BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS tuples_returned BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS tuples_fetched BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS tuples_inserted BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS tuples_updated BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS tuples_deleted BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS wal_bytes BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS xid_age BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS blks_read BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS blks_hit BIGINT`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS max_connections INTEGER`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS slow_query_p50_ms DOUBLE PRECISION`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS slow_query_p95_ms DOUBLE PRECISION`,
+		`ALTER TABLE db_samples ADD COLUMN IF NOT EXISTS slow_query_p99_ms DOUBLE PRECISION`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.pool.Exec(ctx, stmt); err != nil {
@@ -263,7 +280,11 @@ func (s *Store) GetDatabaseMetrics(ctx context.Context, targetID string, limit i
 		       db_size_bytes, slow_queries, active_locks, cache_hit_ratio,
 		       transactions_committed, transactions_rolled_back,
 		       memory_used_bytes, memory_max_bytes, connected_clients, ops_per_sec,
-		       keyspace_hits, keyspace_misses
+		       keyspace_hits, keyspace_misses,
+		       deadlocks, temp_files, temp_bytes,
+		       tuples_returned, tuples_fetched, tuples_inserted, tuples_updated, tuples_deleted,
+		       wal_bytes, xid_age, blks_read, blks_hit, max_connections,
+		       slow_query_p50_ms, slow_query_p95_ms, slow_query_p99_ms
 		FROM db_samples WHERE target_id = $1
 		ORDER BY captured_at DESC LIMIT $2
 	`, targetID, limit)
@@ -281,6 +302,10 @@ func (s *Store) GetDatabaseMetrics(ctx context.Context, targetID string, limit i
 			&s.TransactionsCommitted, &s.TransactionsRolledBack,
 			&s.MemoryUsedBytes, &s.MemoryMaxBytes, &s.ConnectedClients, &s.OpsPerSec,
 			&s.KeyspaceHits, &s.KeyspaceMisses,
+			&s.Deadlocks, &s.TempFiles, &s.TempBytes,
+			&s.TuplesReturned, &s.TuplesFetched, &s.TuplesInserted, &s.TuplesUpdated, &s.TuplesDeleted,
+			&s.WalBytes, &s.XidAge, &s.BlksRead, &s.BlksHit, &s.MaxConnections,
+			&s.SlowQueryP50Ms, &s.SlowQueryP95Ms, &s.SlowQueryP99Ms,
 		); err != nil {
 			return nil, err
 		}
@@ -297,9 +322,14 @@ func (s *Store) insertDBSample(ctx context.Context, sample models.DatabaseSample
 			db_size_bytes, slow_queries, active_locks, cache_hit_ratio,
 			transactions_committed, transactions_rolled_back,
 			memory_used_bytes, memory_max_bytes, connected_clients, ops_per_sec,
-			keyspace_hits, keyspace_misses
+			keyspace_hits, keyspace_misses,
+			deadlocks, temp_files, temp_bytes,
+			tuples_returned, tuples_fetched, tuples_inserted, tuples_updated, tuples_deleted,
+			wal_bytes, xid_age, blks_read, blks_hit, max_connections,
+			slow_query_p50_ms, slow_query_p95_ms, slow_query_p99_ms
 		) VALUES (
-			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20
+			$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,
+			$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36
 		)`,
 		sample.TargetID, sample.CapturedAt, sample.OK, sample.ErrorMessage,
 		sample.ConnectionsActive, sample.ConnectionsIdle, sample.ConnectionsWaiting, sample.ConnectionsTotal,
@@ -307,6 +337,10 @@ func (s *Store) insertDBSample(ctx context.Context, sample models.DatabaseSample
 		sample.TransactionsCommitted, sample.TransactionsRolledBack,
 		sample.MemoryUsedBytes, sample.MemoryMaxBytes, sample.ConnectedClients, sample.OpsPerSec,
 		sample.KeyspaceHits, sample.KeyspaceMisses,
+		sample.Deadlocks, sample.TempFiles, sample.TempBytes,
+		sample.TuplesReturned, sample.TuplesFetched, sample.TuplesInserted, sample.TuplesUpdated, sample.TuplesDeleted,
+		sample.WalBytes, sample.XidAge, sample.BlksRead, sample.BlksHit, sample.MaxConnections,
+		sample.SlowQueryP50Ms, sample.SlowQueryP95Ms, sample.SlowQueryP99Ms,
 	)
 	return err
 }

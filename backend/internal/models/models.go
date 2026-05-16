@@ -316,6 +316,23 @@ type DatabaseSample struct {
 	OpsPerSec              *float64  `json:"ops_per_sec,omitempty"`
 	KeyspaceHits           *int64    `json:"keyspace_hits,omitempty"`
 	KeyspaceMisses         *int64    `json:"keyspace_misses,omitempty"`
+	// Métricas históricas extendidas (Fase A — manager-v1.10.0)
+	Deadlocks         *int64   `json:"deadlocks,omitempty"`
+	TempFiles         *int64   `json:"temp_files,omitempty"`
+	TempBytes         *int64   `json:"temp_bytes,omitempty"`
+	TuplesReturned    *int64   `json:"tuples_returned,omitempty"`
+	TuplesFetched     *int64   `json:"tuples_fetched,omitempty"`
+	TuplesInserted    *int64   `json:"tuples_inserted,omitempty"`
+	TuplesUpdated     *int64   `json:"tuples_updated,omitempty"`
+	TuplesDeleted     *int64   `json:"tuples_deleted,omitempty"`
+	WalBytes          *int64   `json:"wal_bytes,omitempty"`
+	XidAge            *int64   `json:"xid_age,omitempty"`
+	BlksRead          *int64   `json:"blks_read,omitempty"`
+	BlksHit           *int64   `json:"blks_hit,omitempty"`
+	MaxConnections    *int     `json:"max_connections,omitempty"`
+	SlowQueryP50Ms    *float64 `json:"slow_query_p50_ms,omitempty"`
+	SlowQueryP95Ms    *float64 `json:"slow_query_p95_ms,omitempty"`
+	SlowQueryP99Ms    *float64 `json:"slow_query_p99_ms,omitempty"`
 }
 
 type PGLiveInfo struct {
