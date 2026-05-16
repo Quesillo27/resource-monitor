@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -17,9 +16,6 @@ import (
 
 	"resource-monitor/agent/internal/client"
 )
-
-// Regex de eventos interesantes en logs de PG (configurable a futuro).
-var pgLogRegex = regexp.MustCompile(`(?i)\b(FATAL|PANIC|ERROR|WARNING):.*$`)
 
 func collect(ctx context.Context, det Detected, st *State, logPath string) client.DBHostSample {
 	now := time.Now()
@@ -83,9 +79,10 @@ func collect(ctx context.Context, det Detected, st *State, logPath string) clien
 		}
 	}
 
-	// 5) Tail de log con cursor incremental (ultimas N lineas que matchean)
+	// 5) Tail de log con cursor incremental (ultimas N lineas que matchean
+	// patterns relevantes del motor — ver log_patterns.go).
 	if logPath != "" {
-		if events, err := tailLog(logPath, st); err == nil {
+		if events, err := tailLog(logPath, det.Engine, st); err == nil {
 			sample.LogEvents = events
 		}
 	}
@@ -293,10 +290,11 @@ func readFDStats(pid int) (int, int, error) {
 	return used, lim, nil
 }
 
-// tailLog lee log_path desde el cursor guardado en state, filtra lineas que
-// matcheen pgLogRegex y devuelve hasta 20 eventos. Maneja rotacion comparando
-// inode. Para evitar memoria desbocada limita la lectura a 1MB por sample.
-func tailLog(path string, st *State) ([]client.DBHostLogEvent, error) {
+// tailLog lee log_path desde el cursor guardado en state, prueba cada linea
+// contra los patterns del motor (primer match gana) y devuelve hasta 20 eventos.
+// Maneja rotacion comparando inode. Para evitar memoria desbocada limita la
+// lectura a 1MB por sample.
+func tailLog(path, engine string, st *State) ([]client.DBHostLogEvent, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -324,26 +322,28 @@ func tailLog(path string, st *State) ([]client.DBHostLogEvent, error) {
 	const maxRead = 1 << 20
 	limited := io.LimitReader(f, maxRead)
 
+	patterns := patternsFor(engine)
 	events := []client.DBHostLogEvent{}
 	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 1<<16), 1<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
-		m := pgLogRegex.FindStringSubmatch(line)
-		if m == nil {
-			continue
+		// Trim para no inflar payload con líneas muy largas
+		trimmed := line
+		if len(trimmed) > 400 {
+			trimmed = trimmed[:400] + "…"
 		}
-		level := strings.ToUpper(m[1])
-		// Eventos INFO no interesan
-		if level == "INFO" || level == "LOG" {
-			continue
+		for _, p := range patterns {
+			if p.Regex.MatchString(line) {
+				events = append(events, client.DBHostLogEvent{
+					Timestamp: time.Now(),
+					Level:     p.Level,
+					Pattern:   p.Key,
+					Message:   strings.TrimSpace(trimmed),
+				})
+				break
+			}
 		}
-		events = append(events, client.DBHostLogEvent{
-			Timestamp: time.Now(),
-			Level:     level,
-			Pattern:   "regex:" + level,
-			Message:   line,
-		})
 		if len(events) >= 20 {
 			break
 		}

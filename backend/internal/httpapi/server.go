@@ -63,6 +63,8 @@ func (s *Server) Routes() http.Handler {
 	// frontend nginx.
 	downloadsFS := http.FileServer(http.Dir("/downloads"))
 	r.Get("/downloads/*", http.StripPrefix("/downloads/", downloadsFS).ServeHTTP)
+	// Script de instalacion del agente en modo --mode=db (one-shot via curl|bash).
+	r.Get("/install-db-agent.sh", s.installDBAgentScript)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Post("/auth/login", s.login)

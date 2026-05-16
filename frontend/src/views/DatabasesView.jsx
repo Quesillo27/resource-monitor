@@ -2797,6 +2797,13 @@ function HostTab({ agent, samples }) {
     return <div className="db-live-empty"><span>Agente vinculado pero aún sin muestras. Esperando primer heartbeat…</span></div>;
   }
 
+  // Etiqueta del proceso principal según motor (los campos pg_* en el backend
+  // contienen métricas del proceso principal sea postgres/mysqld/mongod).
+  const engineLabel = ({
+    postgres: 'PG', mysql: 'MySQL', mariadb: 'MariaDB', mongo: 'Mongo',
+  })[agent.engine] || (agent.engine || 'BD').toUpperCase();
+  const isPGEngine = agent.engine === 'postgres';
+
   const fsTone = (pct) => pct == null ? '' : pct >= 90 ? '#dc2626' : pct >= 80 ? '#f59e0b' : '#16a34a';
   const recentLogs = [];
   for (const s of samples.slice(0, 30)) {
@@ -2808,17 +2815,19 @@ function HostTab({ agent, samples }) {
 
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      <Panel title={`Host: ${agent.hostname} (${agent.os}/${agent.arch})`}>
+      <Panel title={`Host: ${agent.hostname} (${agent.os}/${agent.arch}) · ${engineLabel}${agent.engine_version ? ' ' + agent.engine_version : ''}`}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
           <HostStat label="FS datadir" value={latest.fs_used_pct != null ? `${latest.fs_used_pct.toFixed(1)}%` : '—'}
             sub={latest.fs_free_bytes != null ? `${bytes(latest.fs_free_bytes)} libre` : ''}
             color={fsTone(latest.fs_used_pct)}/>
-          <HostStat label="CPU proceso PG" value={latest.pg_cpu_pct != null ? `${latest.pg_cpu_pct.toFixed(1)}%` : '—'}/>
-          <HostStat label="RAM proceso PG" value={latest.pg_rss_bytes != null ? bytes(latest.pg_rss_bytes) : '—'}/>
+          <HostStat label={`CPU proceso ${engineLabel}`} value={latest.pg_cpu_pct != null ? `${latest.pg_cpu_pct.toFixed(1)}%` : '—'}/>
+          <HostStat label={`RAM proceso ${engineLabel}`} value={latest.pg_rss_bytes != null ? bytes(latest.pg_rss_bytes) : '—'}/>
           <HostStat label="File descriptors" value={latest.pg_fd_used != null ? `${latest.pg_fd_used}` : '—'}
             sub={latest.pg_fd_limit != null ? `de ${latest.pg_fd_limit}` : ''}/>
-          <HostStat label="WAL latency"
-            value={latest.wal_latency_ms != null ? `${latest.wal_latency_ms.toFixed(1)} ms` : '—'}/>
+          {isPGEngine && (
+            <HostStat label="WAL latency"
+              value={latest.wal_latency_ms != null ? `${latest.wal_latency_ms.toFixed(1)} ms` : '—'}/>
+          )}
           <HostStat label="OOM kills (Δ)"
             value={latest.oom_kills_delta != null ? `${latest.oom_kills_delta}` : '—'}
             color={(latest.oom_kills_delta ?? 0) > 0 ? '#dc2626' : ''}/>
@@ -2864,8 +2873,8 @@ function HostTab({ agent, samples }) {
                 <th>I/O leído</th>
                 <th>I/O escrito</th>
                 <th>OOM Δ</th>
-                <th>PG CPU</th>
-                <th>PG RAM</th>
+                <th>{engineLabel} CPU</th>
+                <th>{engineLabel} RAM</th>
               </tr>
             </thead>
             <tbody>
