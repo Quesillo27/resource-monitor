@@ -115,6 +115,69 @@ func (c *Client) SendOfflineNotice(ctx context.Context, reason string) error {
 	return c.post(ctx, "/api/agent/offline", map[string]string{"reason": reason}, true, nil)
 }
 
+// ── DB Host Agent ────────────────────────────────────────────────────────────
+// Endpoints del modo "agente de BD" (vinculado a un db_target).
+
+type DBHostRegisterRequest struct {
+	EnrollmentToken string `json:"enrollment_token"`
+	Hostname        string `json:"hostname"`
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
+	Engine          string `json:"engine"`
+	EngineVersion   string `json:"engine_version,omitempty"`
+	AgentVersion    string `json:"agent_version,omitempty"`
+}
+
+type DBHostRegisterResponse struct {
+	HostAgentID string `json:"host_agent_id"`
+	DBTargetID  string `json:"db_target_id"`
+	Credential  string `json:"credential"`
+}
+
+type DBHostLogEvent struct {
+	Timestamp time.Time `json:"ts"`
+	Level     string    `json:"level"`
+	Pattern   string    `json:"pattern"`
+	Message   string    `json:"message"`
+}
+
+type DBHostSample struct {
+	CapturedAt    time.Time        `json:"captured_at"`
+	OK            bool             `json:"ok"`
+	ErrorMessage  string           `json:"error_message,omitempty"`
+	FSUsedPct     *float64         `json:"fs_used_pct,omitempty"`
+	FSFreeBytes   *int64           `json:"fs_free_bytes,omitempty"`
+	FSTotalBytes  *int64           `json:"fs_total_bytes,omitempty"`
+	IOReadOps     *int64           `json:"io_read_ops,omitempty"`
+	IOWriteOps    *int64           `json:"io_write_ops,omitempty"`
+	IOReadBytes   *int64           `json:"io_read_bytes,omitempty"`
+	IOWriteBytes  *int64           `json:"io_write_bytes,omitempty"`
+	WalLatencyMs  *float64         `json:"wal_latency_ms,omitempty"`
+	OOMKillsDelta *int             `json:"oom_kills_delta,omitempty"`
+	PGCPUPct      *float64         `json:"pg_cpu_pct,omitempty"`
+	PGRSSBytes    *int64           `json:"pg_rss_bytes,omitempty"`
+	PGFDUsed      *int             `json:"pg_fd_used,omitempty"`
+	PGFDLimit     *int             `json:"pg_fd_limit,omitempty"`
+	PGUptimeSec   *int64           `json:"pg_uptime_seconds,omitempty"`
+	LogEvents     []DBHostLogEvent `json:"log_events,omitempty"`
+}
+
+type DBHostHeartbeatRequest struct {
+	AgentVersion  string       `json:"agent_version,omitempty"`
+	EngineVersion string       `json:"engine_version,omitempty"`
+	Sample        DBHostSample `json:"sample"`
+}
+
+func (c *Client) RegisterDBHost(ctx context.Context, req DBHostRegisterRequest) (DBHostRegisterResponse, error) {
+	var out DBHostRegisterResponse
+	err := c.post(ctx, "/api/db-host/register", req, false, &out)
+	return out, err
+}
+
+func (c *Client) DBHostHeartbeat(ctx context.Context, req DBHostHeartbeatRequest) error {
+	return c.post(ctx, "/api/db-host/heartbeat", req, true, nil)
+}
+
 func (c *Client) post(ctx context.Context, path string, payload any, auth bool, out any) error {
 	if c.baseURL == "" {
 		return fmt.Errorf("server URL is required")

@@ -31,6 +31,18 @@ type Config struct {
 	AllowPublicStatus    bool     `json:"-"`
 	BufferDir            string   `json:"buffer_dir,omitempty"`
 	InventoryFingerprint string   `json:"inventory_fingerprint,omitempty"`
+
+	// ── Modo "agente de BD" ──
+	// Mode="db" activa el modo dual: el binario actúa como agente de host
+	// vinculado a un db_target en vez de a "Equipos". Reusa todo el flujo de
+	// registro/heartbeat/auto-update pero apunta a endpoints /api/db-host/*.
+	Mode          string `json:"mode,omitempty"`             // "agent" (default) | "db"
+	DBTargetID    string `json:"db_target_id,omitempty"`     // poblado al registrarse en modo db
+	HostAgentID   string `json:"host_agent_id,omitempty"`    // poblado al registrarse en modo db
+	Engine        string `json:"engine,omitempty"`           // "postgres" | "mysql" | "mongo" | "" (auto)
+	EngineVersion string `json:"engine_version,omitempty"`   // detectado o configurado
+	DataDir       string `json:"data_dir,omitempty"`         // path datadir (auto si vacío)
+	LogPath       string `json:"log_path,omitempty"`         // path log PG para tail (auto si vacío)
 }
 
 func Load(path string) (Config, error) {
@@ -92,6 +104,21 @@ func LoadWithOverrides(overrides Config) (Config, error) {
 	}
 	if overrides.StatusListenAddr != "" {
 		cfg.StatusListenAddr = overrides.StatusListenAddr
+	}
+	if overrides.Mode != "" {
+		cfg.Mode = overrides.Mode
+	}
+	if overrides.Engine != "" {
+		cfg.Engine = overrides.Engine
+	}
+	if overrides.DataDir != "" {
+		cfg.DataDir = overrides.DataDir
+	}
+	if overrides.LogPath != "" {
+		cfg.LogPath = overrides.LogPath
+	}
+	if cfg.Mode == "" {
+		cfg.Mode = "agent"
 	}
 	if cfg.IntervalSeconds == 0 {
 		cfg.IntervalSeconds = 60

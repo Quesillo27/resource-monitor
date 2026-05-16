@@ -21,6 +21,7 @@ import (
 	"resource-monitor/agent/internal/client"
 	"resource-monitor/agent/internal/collector"
 	"resource-monitor/agent/internal/config"
+	"resource-monitor/agent/internal/dbhost"
 	agentruntime "resource-monitor/agent/internal/runtime"
 	agentservice "resource-monitor/agent/internal/service"
 	"resource-monitor/agent/internal/version"
@@ -175,6 +176,13 @@ func runCmd(args []string) {
 		go startStatusServer(ctx, loaded)
 	}
 
+	// Dispatch segun modo: agente regular vs agente de BD vinculado.
+	if loaded.Mode == "db" {
+		if err := dbhost.Run(ctx, loaded); err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 	if err := agentruntime.Run(ctx, loaded); err != nil {
 		log.Fatal(err)
 	}
@@ -283,6 +291,11 @@ func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	fs.BoolVar(&cfg.InsecureSkipTLS, "insecure-skip-tls", false, "skip TLS certificate verification (only for self-signed servers in LAN)")
 	fs.StringVar(&cfg.StatusListenAddr, "status-listen", "", "address for local status HTTP endpoint (e.g. 127.0.0.1:9099)")
 	fs.BoolVar(&cfg.AllowPublicStatus, "allow-public-status", false, "allow --status-listen to bind on a non-loopback address (network-visible, no auth)")
+	// Modo "agente de BD" — vincula el agente a un db_target en vez de a "Equipos".
+	fs.StringVar(&cfg.Mode, "mode", "", "operating mode: agent (default) | db")
+	fs.StringVar(&cfg.Engine, "engine", "", "db engine when --mode=db: postgres | mysql | mongo (empty = auto-detect)")
+	fs.StringVar(&cfg.DataDir, "data-dir", "", "db datadir path (empty = auto-detect from running process)")
+	fs.StringVar(&cfg.LogPath, "log-path", "", "db log file path to tail (empty = auto-detect)")
 	return fs, cfg
 }
 
@@ -340,6 +353,48 @@ func registerAndSave(cfg *config.Config, path string) error {
 		info.Name = cfg.Name
 	}
 	api := client.NewWithTLS(cfg.ServerURL, "", cfg.InsecureSkipTLS)
+
+	// Modo "agente de BD": registro distinto, contra db_target.
+	if cfg.Mode == "db" {
+		det, derr := dbhost.Detect(cfg.Engine)
+		if derr != nil && cfg.Engine == "" {
+			return fmt.Errorf("no se detecto motor de BD y --engine no fue provisto: %v", derr)
+		}
+		engine := cfg.Engine
+		if engine == "" {
+			engine = det.Engine
+		}
+		req := client.DBHostRegisterRequest{
+			EnrollmentToken: cfg.EnrollmentToken,
+			Hostname:        info.Hostname,
+			OS:              info.OS,
+			Arch:            info.Arch,
+			Engine:          engine,
+			EngineVersion:   det.EngineVersion,
+			AgentVersion:    version.Version,
+		}
+		result, err := api.RegisterDBHost(context.Background(), req)
+		if err != nil {
+			return err
+		}
+		cfg.HostAgentID = result.HostAgentID
+		cfg.DBTargetID = result.DBTargetID
+		cfg.Credential = result.Credential
+		cfg.Engine = engine
+		if cfg.DataDir == "" {
+			cfg.DataDir = det.DataDir
+		}
+		if cfg.LogPath == "" {
+			cfg.LogPath = det.LogPath
+		}
+		cfg.EnrollmentToken = ""
+		if path == "" {
+			path = defaultConfigForRun()
+		}
+		cfg.ConfigPath = path
+		return config.Save(path, *cfg)
+	}
+
 	result, err := api.Register(context.Background(), cfg.EnrollmentToken, info)
 	if err != nil {
 		return err
