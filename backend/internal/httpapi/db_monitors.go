@@ -16,7 +16,7 @@ import (
 
 func validDBType(t string) bool {
 	switch t {
-	case "postgres", "redis", "mysql", "mariadb", "sqlite":
+	case "postgres", "redis", "mysql", "mariadb", "sqlite", "mongodb":
 		return true
 	}
 	return false
@@ -45,7 +45,7 @@ func (s *Server) createDBTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !validDBType(t.Type) {
-		http.Error(w, "type must be postgres, redis, mysql, mariadb or sqlite", http.StatusBadRequest)
+		http.Error(w, "type must be postgres, redis, mysql, mariadb, sqlite or mongodb", http.StatusBadRequest)
 		return
 	}
 	created, err := s.store.CreateDatabaseTarget(r.Context(), t)
@@ -65,7 +65,7 @@ func (s *Server) updateDBTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if t.Type != "" && !validDBType(t.Type) {
-		http.Error(w, "type must be postgres, redis, mysql, mariadb or sqlite", http.StatusBadRequest)
+		http.Error(w, "type must be postgres, redis, mysql, mariadb, sqlite or mongodb", http.StatusBadRequest)
 		return
 	}
 	// If client returned the masked DSN, preserve the original from DB

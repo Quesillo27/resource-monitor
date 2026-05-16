@@ -23,12 +23,14 @@ function typeIcon(type) {
     case 'mysql':   return <span className="db-type-pill db-type-mysql">MySQL</span>;
     case 'mariadb': return <span className="db-type-pill db-type-mysql">MariaDB</span>;
     case 'sqlite':  return <span className="db-type-pill db-type-sqlite">SQLite</span>;
+    case 'mongodb': return <span className="db-type-pill db-type-mongodb">MongoDB</span>;
     default:        return <span className="db-type-pill db-type-postgres">PostgreSQL</span>;
   }
 }
 
 const RELATIONAL_TYPES   = ['postgres', 'mysql', 'mariadb', 'sqlite'];
 const KEYVALUE_TYPES     = ['redis'];
+const DOCUMENT_TYPES     = ['mongodb'];
 const SUPPORTED_DB_TYPES = [
   {
     value: 'postgres', label: 'PostgreSQL', icon: 'PG', tone: 'pg',
@@ -102,6 +104,20 @@ const SUPPORTED_DB_TYPES = [
       'Keys count por DB',
     ],
   },
+  {
+    value: 'mongodb', label: 'MongoDB', icon: 'MG', tone: 'mg',
+    minVersion: '4.0', recommended: '6.0+',
+    versionsHint: 'Soporta mongodb:// y mongodb+srv:// (Atlas). El usuario necesita rol clusterMonitor o readAnyDatabase para serverStatus/dbStats. WiredTiger 3.0+ para cache stats.',
+    metrics: [
+      'Conexiones (current/available)',
+      'Tamaño de la base (dataSize)',
+      'Opcounters: insert/update/delete/query (TPS derivado)',
+      'WiredTiger cache hit estimado',
+      'Memoria residente del proceso',
+      'Cola global de locks',
+      'Replica set status (perfil completo)',
+    ],
+  },
 ];
 
 const MONITORING_PROFILES = [
@@ -137,6 +153,7 @@ function dbTypeColor(type) {
     case 'mysql':   return '#0891b2';
     case 'mariadb': return '#a16207';
     case 'sqlite':  return '#7c3aed';
+    case 'mongodb': return '#16a34a';
     default:        return '#2563eb';
   }
 }
@@ -2072,7 +2089,7 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
             autoFocus/>
         </div>
 
-        {isRelational(form.type) ? (
+        {isRelational(form.type) || form.type === 'mongodb' ? (
           <div className="db-form-field">
             <label className="db-form-label" htmlFor="db-f-dsn">
               {form.type === 'sqlite' ? 'Ruta del archivo' : 'URL de conexión'}
@@ -2084,12 +2101,18 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
                 form.type === 'mysql'   ? 'mysql://usuario:contraseña@host:3306/nombre_bd' :
                 form.type === 'mariadb' ? 'mariadb://usuario:contraseña@host:3306/nombre_bd' :
                 form.type === 'sqlite'  ? '/ruta/al/archivo.db (lectura)' :
+                form.type === 'mongodb' ? 'mongodb://usuario:contraseña@host:27017/nombre_bd' :
                                           'postgres://usuario:contraseña@host:5432/nombre_bd'
               }
               autoComplete="off" spellCheck={false}/>
             {form.type === 'sqlite' && (
               <span className="db-form-optional" style={{ marginTop: 4, fontSize: 11 }}>
                 El archivo debe ser accesible para el backend (montado dentro del contenedor).
+              </span>
+            )}
+            {form.type === 'mongodb' && (
+              <span className="db-form-optional" style={{ marginTop: 4, fontSize: 11 }}>
+                También soporta mongodb+srv:// (Atlas). Usuario necesita rol clusterMonitor o readAnyDatabase.
               </span>
             )}
           </div>

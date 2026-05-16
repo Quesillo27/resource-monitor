@@ -413,6 +413,22 @@ func TestConnection(ctx context.Context, dbType, dsn string, params map[string]s
 				return 0, fmt.Errorf("authentication failed")
 			}
 		}
+	case "mysql", "mariadb":
+		// Reusa el collector para validar — no nos interesa el sample, solo el ping
+		s := collectMySQLDB(ctx, dsn, "basic")
+		if !s.OK {
+			return 0, fmt.Errorf("%s", s.ErrorMessage)
+		}
+	case "sqlite":
+		s := collectSQLiteDB(ctx, dsn)
+		if !s.OK {
+			return 0, fmt.Errorf("%s", s.ErrorMessage)
+		}
+	case "mongodb":
+		s := collectMongoDB(ctx, dsn, "basic")
+		if !s.OK {
+			return 0, fmt.Errorf("%s", s.ErrorMessage)
+		}
 	default:
 		return 0, fmt.Errorf("unsupported type: %s", dbType)
 	}

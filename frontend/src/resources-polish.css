@@ -363,6 +363,7 @@
 .db-type-redis    { background: #fee2e2; color: #991b1b; }
 .db-type-mysql    { background: #cffafe; color: #155e75; }
 .db-type-sqlite   { background: #ede9fe; color: #5b21b6; }
+.db-type-mongodb  { background: #dcfce7; color: #166534; }
 
 /* ── Target list ───────────────────────────────────────────────────────── */
 .db-target-list { display: grid; gap: 8px; }
@@ -946,6 +947,7 @@
 .db-type-btn.active-rd { border-color: #ef4444; background: #fff1f2; color: #991b1b; }
 .db-type-btn.active-my { border-color: #06b6d4; background: #ecfeff; color: #155e75; }
 .db-type-btn.active-sq { border-color: #8b5cf6; background: #f5f3ff; color: #5b21b6; }
+.db-type-btn.active-mg { border-color: #16a34a; background: #f0fdf4; color: #166534; }
 .db-type-icon {
   width: 22px; height: 22px; border-radius: 5px; display: flex; align-items: center;
   justify-content: center; font-size: 10px; font-weight: 800; flex-shrink: 0;
@@ -954,6 +956,7 @@
 .db-type-icon.rd { background: #fee2e2; color: #991b1b; }
 .db-type-icon.my { background: #cffafe; color: #155e75; }
 .db-type-icon.sq { background: #ede9fe; color: #5b21b6; }
+.db-type-icon.mg { background: #dcfce7; color: #166534; }
 
 .db-form-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .db-form-with-unit { display: flex; align-items: center; gap: 8px; }
@@ -1206,6 +1209,7 @@
 .db-type-btn.active-rd { border-color: #ef4444; background: #fff1f2; color: #991b1b; }
 .db-type-btn.active-my { border-color: #06b6d4; background: #ecfeff; color: #155e75; }
 .db-type-btn.active-sq { border-color: #8b5cf6; background: #f5f3ff; color: #5b21b6; }
+.db-type-btn.active-mg { border-color: #16a34a; background: #f0fdf4; color: #166534; }
 
 /* ── Responsive tweaks ─────────────────────────────────────────────────── */
 @media (max-width: 640px) {

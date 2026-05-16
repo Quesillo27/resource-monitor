@@ -417,6 +417,8 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 				sample = collectMySQLDB(ctx, pt.dsn, profile)
 			case "sqlite":
 				sample = collectSQLiteDB(ctx, pt.dsn)
+			case "mongodb":
+				sample = collectMongoDB(ctx, pt.dsn, profile)
 			default:
 				sample = models.DatabaseSample{OK: false, ErrorMessage: fmt.Sprintf("unsupported type: %s", pt.dbType)}
 			}
