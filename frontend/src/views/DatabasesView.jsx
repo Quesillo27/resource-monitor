@@ -1995,11 +1995,29 @@ function TrendsPanel({ samples, isPG }) {
   const [rangeKey, setRangeKey] = useState('1h');
   const range = TREND_RANGES.find(r => r.key === rangeKey) || TREND_RANGES[1];
 
+  // Span temporal real disponible en las muestras (en minutos)
+  const availableSpanMin = useMemo(() => {
+    if (samples.length < 2) return 0;
+    const newest = new Date(samples[0].captured_at).getTime();
+    const oldest = new Date(samples[samples.length - 1].captured_at).getTime();
+    return Math.max(0, (newest - oldest) / 60000);
+  }, [samples]);
+
   const filtered = useMemo(() => {
     if (range.minutes == null) return samples;
     const cutoff = Date.now() - range.minutes * 60 * 1000;
     return samples.filter(s => new Date(s.captured_at).getTime() >= cutoff);
   }, [samples, range]);
+
+  const rangeExceedsData = range.minutes != null && availableSpanMin < range.minutes * 0.8 && samples.length >= 2;
+
+  const fmtSpan = (min) => {
+    if (min < 1) return 'menos de 1 min';
+    if (min < 60) return `${Math.round(min)} min`;
+    const h = min / 60;
+    if (h < 24) return `${h >= 10 ? Math.round(h) : h.toFixed(1)} h`;
+    return `${(h / 24).toFixed(1)} d`;
+  };
 
   const has = (pred) => filtered.some(pred);
 
@@ -2067,12 +2085,21 @@ function TrendsPanel({ samples, isPG }) {
           ))}
         </div>
         <span className="db-trends-meta">
-          {filtered.length} {filtered.length === 1 ? 'muestra' : 'muestras'}
-          {filtered.length < samples.length && ` (de ${samples.length})`}
+          {filtered.length} de {samples.length} {samples.length === 1 ? 'muestra' : 'muestras'}
+          {availableSpanMin > 0 && ` · histórico: ${fmtSpan(availableSpanMin)}`}
         </span>
       </div>
+      {rangeExceedsData && (
+        <div className="db-trends-warn">
+          ⚠ Pediste {range.label} pero solo hay {fmtSpan(availableSpanMin)} de datos. Esperá a que se acumulen más muestras o elegí un rango más corto.
+        </div>
+      )}
       {filtered.length < 2 ? (
-        <div className="empty-chart">Sin suficientes muestras en el rango seleccionado</div>
+        <div className="empty-chart">
+          {samples.length < 2
+            ? 'Esperando primeras muestras del polling…'
+            : `Sin muestras en los últimos ${range.label}. Probá un rango más amplio.`}
+        </div>
       ) : (
         <div className="db-trends-grid">
           {charts.map(c => (
@@ -2088,7 +2115,7 @@ function TrendsPanel({ samples, isPG }) {
 
 function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
   const { data, loading, reload, lastUpdated } = useLoad(
-    () => api.get(`/api/db-targets/${target.id}/metrics?limit=60`),
+    () => api.get(`/api/db-targets/${target.id}/metrics?limit=360`),
     [target.id],
     DB_REFRESH_MS,
   );
