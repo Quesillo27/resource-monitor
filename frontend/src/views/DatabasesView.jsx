@@ -704,16 +704,43 @@ function TableSizesPanel({ api, targetId }) {
     [targetId],
     60_000,
   );
+  const [search, setSearch] = useState('');
   const tables  = data?.tables || [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return tables;
+    return tables.filter(t => `${t.schema}.${t.table}`.toLowerCase().includes(term));
+  }, [tables, search]);
   const maxBytes = tables[0]?.total_bytes || 1;
+  const onExportCSV = () => {
+    const rows = [
+      ['schema', 'table', 'total_bytes', 'index_bytes'],
+      ...filtered.map(t => [t.schema, t.table, t.total_bytes, t.index_bytes]),
+    ];
+    downloadCSV(rows, `table-sizes-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
   if (loading && !data) return <Skeleton/>;
   if (!data) return <div className="db-live-err">No se pudo cargar tamaños de tablas</div>;
   return (
     <div className="db-tblsize-wrap">
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <input
+          type="search"
+          placeholder="Filtrar por nombre…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}
+        />
+        <span style={{ fontSize: 12, color: '#64748b' }}>{filtered.length} / {tables.length}</span>
+        <button type="button" onClick={onExportCSV} disabled={filtered.length === 0}
+          style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer' }}>
+          Exportar CSV
+        </button>
+      </div>
       <table className="db-live-table">
         <thead><tr><th>Tabla</th><th>Total</th><th>Distribución</th><th>Índices</th></tr></thead>
         <tbody>
-          {tables.map((t, i) => {
+          {filtered.map((t, i) => {
             const pctTotal = Math.round((t.total_bytes / maxBytes) * 100);
             const pctIdx   = t.total_bytes > 0 ? Math.round((t.index_bytes / t.total_bytes) * 100) : 0;
             return (
@@ -811,18 +838,67 @@ function IndexUsagePanel({ api, targetId }) {
     120_000,
   );
   const indexes = data?.indexes || [];
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('scans');
+  const [sortDir, setSortDir] = useState('asc'); // asc para ver primero los sin uso
+
+  const sortBy = (key) => {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir(key === 'scans' ? 'asc' : 'desc'); }
+  };
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return indexes;
+    return indexes.filter(idx => `${idx.schema}.${idx.table}.${idx.index}`.toLowerCase().includes(term));
+  }, [indexes, search]);
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const av = a[sortKey] ?? 0;
+      const bv = b[sortKey] ?? 0;
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortDir === 'asc' ? (av - bv) : (bv - av);
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+  const onExportCSV = () => {
+    const rows = [
+      ['schema', 'table', 'index', 'scans', 'size_bytes', 'is_unique'],
+      ...sorted.map(idx => [idx.schema, idx.table, idx.index, idx.scans, idx.size_bytes, idx.is_unique]),
+    ];
+    downloadCSV(rows, `index-usage-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
+
   if (loading && !data) return <Skeleton/>;
   if (!data) return <div className="db-live-err">No se pudo obtener uso de índices</div>;
   if (indexes.length === 0) return <div className="db-live-empty">Sin índices para mostrar</div>;
 
   return (
     <div className="db-live-table-wrap">
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <input
+          type="search"
+          placeholder="Filtrar índice/tabla…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}
+        />
+        <span style={{ fontSize: 12, color: '#64748b' }}>{sorted.length} / {indexes.length}</span>
+        <button type="button" onClick={onExportCSV} disabled={sorted.length === 0}
+          style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer' }}>
+          Exportar CSV
+        </button>
+      </div>
       <table className="db-live-table">
         <thead><tr>
-          <th>Índice</th><th>Tabla</th><th>Scans</th><th>Tamaño</th><th>Tipo</th>
+          <SortHeader label="Índice"  sortKey="index"      currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Tabla"   sortKey="table"      currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Scans"   sortKey="scans"      currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Tamaño"  sortKey="size_bytes" currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <th>Tipo</th>
         </tr></thead>
         <tbody>
-          {indexes.map((idx, i) => {
+          {sorted.map((idx, i) => {
             const unused = idx.scans === 0;
             return (
               <tr key={i} className={unused && idx.size_bytes > 0 ? 'db-row-unused' : ''}>
