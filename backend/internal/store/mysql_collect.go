@@ -116,7 +116,9 @@ func atof64(s string) float64 {
 	return v
 }
 
-func collectMySQLDB(ctx context.Context, raw string) models.DatabaseSample {
+// Perfiles: "basic" recolecta solo ping + Threads_connected/running + max_connections + db_size.
+// "standard" agrega TPS source, cache hit, locks, slow queries. "full" agrega tuple stats e Innodb deep.
+func collectMySQLDB(ctx context.Context, raw, profile string) models.DatabaseSample {
 	sample := models.DatabaseSample{OK: true}
 	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -166,6 +168,21 @@ func collectMySQLDB(ctx context.Context, raw string) models.DatabaseSample {
 		sample.MaxConnections = &mc
 	}
 
+	// Tamaño total de la base (siempre, util para alertas basicas)
+	var dbSize int64
+	if err := db.QueryRowContext(pollCtx, `
+		SELECT COALESCE(SUM(data_length + index_length), 0)
+		FROM information_schema.tables
+		WHERE table_schema = DATABASE()
+	`).Scan(&dbSize); err == nil && dbSize > 0 {
+		sample.DBSizeBytes = &dbSize
+	}
+
+	// Perfil basic: termina aca
+	if profile == "basic" {
+		return sample
+	}
+
 	// TPS source: Com_commit + Com_rollback (totales acumulados)
 	commits := atoi64(status["Com_commit"])
 	rollbacks := atoi64(status["Com_rollback"])
@@ -181,6 +198,12 @@ func collectMySQLDB(ctx context.Context, raw string) models.DatabaseSample {
 			ratio = 0
 		}
 		sample.CacheHitRatio = &ratio
+	}
+
+	// Perfil standard: termina aca. Tuple stats van en "full" (mismo dato del SHOW STATUS,
+	// pero los exponemos solo en perfil completo para mantener coherencia con PG)
+	if profile != "full" {
+		return sample
 	}
 
 	// Tuple-equivalent counters: Innodb_rows_*
@@ -221,16 +244,6 @@ func collectMySQLDB(ctx context.Context, raw string) models.DatabaseSample {
 	// Connections waiting (kernel queue)
 	if v, ok := status["Threads_cached"]; ok {
 		_ = v // no lo usamos directamente; se podría exponer en extras
-	}
-
-	// Tamaño total de la base actual (si se especificó base en el DSN)
-	var dbSize int64
-	if err := db.QueryRowContext(pollCtx, `
-		SELECT COALESCE(SUM(data_length + index_length), 0)
-		FROM information_schema.tables
-		WHERE table_schema = DATABASE()
-	`).Scan(&dbSize); err == nil && dbSize > 0 {
-		sample.DBSizeBytes = &dbSize
 	}
 
 	// Bytes leídos/escritos InnoDB → blks_read/hit como proxy

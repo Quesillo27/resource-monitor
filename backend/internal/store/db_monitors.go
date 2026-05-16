@@ -400,13 +400,17 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 		go func(pt pollTarget) {
 			defer wg.Done()
 			var sample models.DatabaseSample
+			profile := pt.params["profile"]
+			if profile == "" {
+				profile = "standard"
+			}
 			switch pt.dbType {
 			case "postgres":
-				sample = collectPostgresDB(ctx, pt.dsn)
+				sample = collectPostgresDB(ctx, pt.dsn, profile)
 			case "redis":
 				sample = collectRedisDB(ctx, pt.dsn, pt.params["password"])
 			case "mysql", "mariadb":
-				sample = collectMySQLDB(ctx, pt.dsn)
+				sample = collectMySQLDB(ctx, pt.dsn, profile)
 			case "sqlite":
 				sample = collectSQLiteDB(ctx, pt.dsn)
 			default:
@@ -422,7 +426,10 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 	wg.Wait()
 }
 
-func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
+// Perfiles: "basic" recolecta solo conexiones + db_size + ping; "standard"
+// agrega cache hit, TPS, slow queries activas, locks, tuple stats; "full"
+// agrega percentiles p50/p95/p99 y tuple counts adicionales.
+func collectPostgresDB(ctx context.Context, dsn, profile string) models.DatabaseSample {
 	sample := models.DatabaseSample{OK: true}
 	pollCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -472,6 +479,17 @@ func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
 	var dbSize int64
 	if conn.QueryRow(pollCtx, `SELECT pg_database_size(current_database())`).Scan(&dbSize) == nil {
 		sample.DBSizeBytes = &dbSize
+	}
+
+	// max_connections siempre (lo usa el perfil basic para alertas de pool)
+	var maxConn int
+	if conn.QueryRow(pollCtx, `SELECT setting::int FROM pg_settings WHERE name = 'max_connections'`).Scan(&maxConn) == nil {
+		sample.MaxConnections = &maxConn
+	}
+
+	// Perfil "basic": termina aca — solo ping + conexiones + db size + max_connections
+	if profile == "basic" {
+		return sample
 	}
 
 	// Métricas agregadas de pg_stat_database (cache, tx, tuples, temp, blks, deadlocks) en una sola query
@@ -531,10 +549,10 @@ func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
 		sample.SlowQueries = &slow
 	}
 
-	// max_connections (para derivar % de uso vs pool)
-	var maxConn int
-	if conn.QueryRow(pollCtx, `SELECT setting::int FROM pg_settings WHERE name = 'max_connections'`).Scan(&maxConn) == nil {
-		sample.MaxConnections = &maxConn
+	// Perfil "standard": termina aca. Las metricas mas pesadas (xid, WAL, percentiles)
+	// solo aplican al perfil "full".
+	if profile != "full" {
+		return sample
 	}
 
 	// Backend xid age (alertas predictivas wraparound — max global)
