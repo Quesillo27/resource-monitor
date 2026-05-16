@@ -3,7 +3,7 @@ import {
   Activity, ChevronLeft, Database, Edit3, HelpCircle, Plus,
   Terminal, Trash2, Wifi, WifiOff, Zap,
 } from 'lucide-react';
-import { Header, IconButton, Modal, Panel, RefreshMeta, Skeleton, bytes, round, useLoad } from '../lib/ui';
+import { Drawer, Header, IconButton, Modal, Panel, RefreshMeta, Skeleton, bytes, round, useLoad } from '../lib/ui';
 
 const DB_REFRESH_MS  = 30_000;
 const LIVE_REFRESH_MS = 12_000;
@@ -1605,7 +1605,19 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
   }
 
   return (
-    <Modal title={isNew ? 'Agregar base de datos' : 'Editar base de datos'} onClose={onClose}>
+    <Drawer
+      title={isNew ? 'Agregar base de datos' : 'Editar base de datos'}
+      subtitle={isNew ? 'Configura la conexión y comenzaremos a monitorear automáticamente.' : `Editando: ${form.name || 'sin nombre'}`}
+      onClose={onClose}
+      footer={
+        <>
+          <button className="db-form-btn" type="button" onClick={onClose}>Cancelar</button>
+          <button className="db-form-btn db-form-btn-primary" type="button"
+            onClick={() => onSave(form)} disabled={saving || !form.name || !form.dsn}>
+            {saving ? 'Guardando…' : isNew ? 'Agregar base de datos' : 'Guardar cambios'}
+          </button>
+        </>
+      }>
       <div className="db-form">
 
         <div className="db-form-field">
@@ -1711,15 +1723,7 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
       </div>
 
       {error && <div className="status-msg err" style={{ marginBottom: 0 }}>{error}</div>}
-
-      <div className="db-form-actions">
-        <button className="db-form-btn" type="button" onClick={onClose}>Cancelar</button>
-        <button className="db-form-btn db-form-btn-primary" type="button"
-          onClick={() => onSave(form)} disabled={saving || !form.name || !form.dsn}>
-          {saving ? 'Guardando…' : isNew ? 'Agregar base de datos' : 'Guardar cambios'}
-        </button>
-      </div>
-    </Modal>
+    </Drawer>
   );
 }
 

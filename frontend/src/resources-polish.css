@@ -549,6 +549,79 @@
   .db-trends-grid { grid-template-columns: 1fr; }
 }
 
+/* ── Drawer (panel deslizante derecho) ─────────────────────────────────── */
+@keyframes drawerFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+.drawer-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(2px);
+  display: flex; justify-content: flex-end;
+  animation: drawerFadeIn .18s ease-out;
+}
+
+.drawer-panel {
+  background: white;
+  height: 100vh;
+  display: flex; flex-direction: column;
+  box-shadow: -10px 0 30px rgba(15, 23, 42, .18);
+  animation: drawerSlideIn .25s cubic-bezier(.32, .72, 0, 1);
+  overflow: hidden;
+}
+
+.drawer-head {
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  flex-shrink: 0;
+}
+.drawer-title { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.drawer-title h3 {
+  margin: 0; font-size: 17px; font-weight: 700; color: #0f172a; line-height: 1.2;
+}
+.drawer-subtitle {
+  font-size: 12px; color: #64748b; line-height: 1.3;
+}
+
+.drawer-close {
+  background: transparent; border: 1px solid #e2e8f0; border-radius: 6px;
+  width: 30px; height: 30px; font-size: 20px; line-height: 1; cursor: pointer;
+  color: #64748b; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.drawer-close:hover { background: #f1f5f9; color: #0f172a; border-color: #cbd5e1; }
+
+.drawer-body {
+  flex: 1; overflow-y: auto;
+  padding: 18px 22px;
+}
+
+.drawer-foot {
+  padding: 14px 22px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex; gap: 10px; justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+/* Cuando un Modal usa db-form adentro del drawer, usar ancho completo */
+.drawer-body .db-form {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.drawer-body .db-form-actions {
+  display: none; /* se reemplaza por drawer-foot */
+}
+
+@media (max-width: 560px) {
+  .drawer-panel { width: 100% !important; }
+  .drawer-head, .drawer-body, .drawer-foot { padding-left: 16px; padding-right: 16px; }
+}
+
 .db-metrics-empty {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--text-muted); padding: 10px 0;

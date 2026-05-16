@@ -229,6 +229,38 @@ export function Modal({ title, children, onClose }) {
   );
 }
 
+// Drawer: panel deslizante desde la derecha. Misma API que Modal.
+// Se monta con animación slide-in; cierra con ESC, click en backdrop, o boton X.
+// `width` acepta cualquier valor CSS (ej: "480px", "min(560px, 92vw)").
+export function Drawer({ title, subtitle, children, onClose, footer, width = 'min(520px, 94vw)' }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="drawer-backdrop" onClick={onClose}>
+      <aside className="drawer-panel" style={{ width }} onClick={(e) => e.stopPropagation()}
+             role="dialog" aria-modal="true" aria-label={title}>
+        <header className="drawer-head">
+          <div className="drawer-title">
+            <h3>{title}</h3>
+            {subtitle && <span className="drawer-subtitle">{subtitle}</span>}
+          </div>
+          <button className="drawer-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </header>
+        <div className="drawer-body">{children}</div>
+        {footer && <footer className="drawer-foot">{footer}</footer>}
+      </aside>
+    </div>
+  );
+}
+
 export function AlertList({ alerts, compact = false, api = null, onChange = null }) {
   const [channels, setChannels] = useState({ smtpOk: false, telegramOk: false });
   useEffect(() => {
