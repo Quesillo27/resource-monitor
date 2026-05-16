@@ -18,9 +18,36 @@ function statusBadge(t) {
 }
 
 function typeIcon(type) {
-  return type === 'redis'
-    ? <span className="db-type-pill db-type-redis">Redis</span>
-    : <span className="db-type-pill db-type-postgres">PostgreSQL</span>;
+  switch (type) {
+    case 'redis':   return <span className="db-type-pill db-type-redis">Redis</span>;
+    case 'mysql':   return <span className="db-type-pill db-type-mysql">MySQL</span>;
+    case 'mariadb': return <span className="db-type-pill db-type-mysql">MariaDB</span>;
+    case 'sqlite':  return <span className="db-type-pill db-type-sqlite">SQLite</span>;
+    default:        return <span className="db-type-pill db-type-postgres">PostgreSQL</span>;
+  }
+}
+
+const RELATIONAL_TYPES   = ['postgres', 'mysql', 'mariadb', 'sqlite'];
+const KEYVALUE_TYPES     = ['redis'];
+const SUPPORTED_DB_TYPES = [
+  { value: 'postgres', label: 'PostgreSQL', icon: 'PG', tone: 'pg' },
+  { value: 'mysql',    label: 'MySQL',      icon: 'MY', tone: 'my' },
+  { value: 'mariadb',  label: 'MariaDB',    icon: 'MA', tone: 'my' },
+  { value: 'sqlite',   label: 'SQLite',     icon: 'SQ', tone: 'sq' },
+  { value: 'redis',    label: 'Redis',      icon: 'R',  tone: 'rd' },
+];
+
+function isRelational(type) { return RELATIONAL_TYPES.includes(type); }
+function isKeyValue(type)   { return KEYVALUE_TYPES.includes(type); }
+
+function dbTypeColor(type) {
+  switch (type) {
+    case 'redis':   return '#dc2626';
+    case 'mysql':   return '#0891b2';
+    case 'mariadb': return '#a16207';
+    case 'sqlite':  return '#7c3aed';
+    default:        return '#2563eb';
+  }
 }
 
 function cacheColor(ratio) {
@@ -1490,14 +1517,13 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
         <div className="db-form-field">
           <span className="db-form-label">Tipo de base de datos</span>
           <div className="db-type-selector">
-            <button type="button" className={`db-type-btn${form.type === 'postgres' ? ' active-pg' : ''}`}
-              onClick={() => set('type', 'postgres')}>
-              <span className="db-type-icon pg">PG</span>PostgreSQL
-            </button>
-            <button type="button" className={`db-type-btn${form.type === 'redis' ? ' active-rd' : ''}`}
-              onClick={() => set('type', 'redis')}>
-              <span className="db-type-icon rd">R</span>Redis
-            </button>
+            {SUPPORTED_DB_TYPES.map(t => (
+              <button key={t.value} type="button"
+                className={`db-type-btn${form.type === t.value ? ` active-${t.tone}` : ''}`}
+                onClick={() => set('type', t.value)}>
+                <span className={`db-type-icon ${t.tone}`}>{t.icon}</span>{t.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -1505,20 +1531,36 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
           <label className="db-form-label" htmlFor="db-f-name">Nombre</label>
           <input id="db-f-name" className="db-form-input" value={form.name}
             onChange={e => set('name', e.target.value)}
-            placeholder={form.type === 'postgres' ? 'Ej: Producción PostgreSQL' : 'Ej: Redis caché'}
+            placeholder={
+              form.type === 'redis'   ? 'Ej: Redis caché' :
+              form.type === 'mysql'   ? 'Ej: Producción MySQL' :
+              form.type === 'mariadb' ? 'Ej: Producción MariaDB' :
+              form.type === 'sqlite'  ? 'Ej: shortr.db' :
+                                        'Ej: Producción PostgreSQL'
+            }
             autoFocus/>
         </div>
 
-        {form.type === 'postgres' ? (
+        {isRelational(form.type) ? (
           <div className="db-form-field">
             <label className="db-form-label" htmlFor="db-f-dsn">
-              URL de conexión
-              <span className="db-form-optional"> — incluye credenciales en la URL</span>
+              {form.type === 'sqlite' ? 'Ruta del archivo' : 'URL de conexión'}
+              {form.type !== 'sqlite' && <span className="db-form-optional"> — incluye credenciales en la URL</span>}
             </label>
             <input id="db-f-dsn" className="db-form-input db-form-mono" value={form.dsn}
               onChange={e => set('dsn', e.target.value)}
-              placeholder="postgres://usuario:contraseña@host:5432/nombre_bd"
+              placeholder={
+                form.type === 'mysql'   ? 'mysql://usuario:contraseña@host:3306/nombre_bd' :
+                form.type === 'mariadb' ? 'mariadb://usuario:contraseña@host:3306/nombre_bd' :
+                form.type === 'sqlite'  ? '/ruta/al/archivo.db (lectura)' :
+                                          'postgres://usuario:contraseña@host:5432/nombre_bd'
+              }
               autoComplete="off" spellCheck={false}/>
+            {form.type === 'sqlite' && (
+              <span className="db-form-optional" style={{ marginTop: 4, fontSize: 11 }}>
+                El archivo debe ser accesible para el backend (montado dentro del contenedor).
+              </span>
+            )}
           </div>
         ) : (
           <>
@@ -1599,11 +1641,19 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
   const samples = useMemo(() => enrichSamples(data?.samples || []), [data]);
   const latest  = samples[0] || null;
   const isPG    = target.type === 'postgres';
+  const isRD    = target.type === 'redis';
+  const isMY    = target.type === 'mysql' || target.type === 'mariadb';
+  const isSL    = target.type === 'sqlite';
 
   // Tabs disponibles según el tipo
+  // Postgres: full feature set (rutas PG-specific funcionan)
+  // Redis:    resumen + en-vivo (4 paneles redis) + historial
+  // MySQL/MariaDB: resumen + historial — endpoints avanzados no implementados aún
+  // SQLite:   resumen + historial — engine embebido sin live ops remotas
   const pgTabs  = ['resumen', 'en-vivo', 'servidor', 'almacenamiento', 'diagnostico', 'historial'];
   const rdTabs  = ['resumen', 'en-vivo', 'historial'];
-  const tabs    = isPG ? pgTabs : rdTabs;
+  const myTabs  = ['resumen', 'historial'];
+  const tabs    = isPG ? pgTabs : isRD ? rdTabs : myTabs;
 
   const tabLabels = {
     'resumen':        'Resumen',
@@ -1622,7 +1672,7 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
         <button className="db-back-btn" type="button" onClick={onBack}>
           <ChevronLeft size={15}/> Volver
         </button>
-        <Database size={17} style={{ color: isPG ? '#2563eb' : '#dc2626', flexShrink: 0 }}/>
+        <Database size={17} style={{ color: dbTypeColor(target.type), flexShrink: 0 }}/>
         <strong className="db-detail-name">{target.name}</strong>
         {typeIcon(target.type)}
         {statusBadge(target)}
@@ -2034,7 +2084,7 @@ export default function DatabasesView({ api }) {
 
                   <div className="db-target-card-header">
                     <div className="db-card-id">
-                      <Database size={15} style={{ color: t.type === 'redis' ? '#dc2626' : '#2563eb', flexShrink: 0 }}/>
+                      <Database size={15} style={{ color: dbTypeColor(t.type), flexShrink: 0 }}/>
                       <strong>{t.name}</strong>
                       {typeIcon(t.type)}
                       {statusBadge(t)}
@@ -2042,7 +2092,7 @@ export default function DatabasesView({ api }) {
                     </div>
                     <div className="db-card-right" onClick={e => e.stopPropagation()}>
                       {t.sparkline?.length >= 2 && (
-                        <Sparkline values={t.sparkline} color={t.type === 'redis' ? '#ef4444' : '#3b82f6'}/>
+                        <Sparkline values={t.sparkline} color={dbTypeColor(t.type)}/>
                       )}
                       <IconButton icon={Edit3} label="Editar" onClick={() => openModal(t)}/>
                       <IconButton icon={Trash2} label="Eliminar" onClick={() => setConfirmDelete(t.id)}/>
