@@ -857,13 +857,81 @@ function IndexUsagePanel({ api, targetId }) {
 
 // ── SlowQueriesPanel ──────────────────────────────────────────────────────────
 
+function csvEscape(v) {
+  if (v == null) return '';
+  const s = String(v);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function downloadCSV(rows, filename) {
+  const csv = rows.map(r => r.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function SortHeader({ label, sortKey, currentKey, currentDir, onSort, title }) {
+  const active = sortKey === currentKey;
+  return (
+    <th onClick={() => onSort(sortKey)} title={title || `Ordenar por ${label}`}
+        style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+      {label}
+      <span style={{ marginLeft: 4, color: active ? 'var(--accent, #3b82f6)' : '#94a3b8', fontSize: 10 }}>
+        {active ? (currentDir === 'asc' ? '▲' : '▼') : '⇅'}
+      </span>
+    </th>
+  );
+}
+
 function SlowQueriesPanel({ api, targetId }) {
   const { data, loading, reload, lastUpdated } = useLoad(
     () => api.get(`/api/db-targets/${targetId}/slow-queries`),
     [targetId],
     60_000,
   );
+  const [search, setSearch]     = useState('');
+  const [sortKey, setSortKey]   = useState('total_ms');
+  const [sortDir, setSortDir]   = useState('desc');
+  const [modalQuery, setModalQuery] = useState(null);
+
   const queries = data?.queries || [];
+
+  const sortBy = (key) => {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return queries;
+    return queries.filter(q => (q.query || '').toLowerCase().includes(term));
+  }, [queries, search]);
+
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const av = a[sortKey] ?? 0;
+      const bv = b[sortKey] ?? 0;
+      if (typeof av === 'string') {
+        return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      }
+      return sortDir === 'asc' ? (av - bv) : (bv - av);
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const onExportCSV = () => {
+    const header = ['query', 'calls', 'total_ms', 'mean_ms', 'max_ms', 'cache_hit_pct'];
+    const rows = [header, ...sorted.map(q => [
+      q.query, q.calls, q.total_ms, q.mean_ms, q.max_ms, q.cache_hit_pct,
+    ])];
+    downloadCSV(rows, `slow-queries-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
+
   if (loading && !data) return <Skeleton/>;
   if (!data) return <div className="db-live-err">No se pudo consultar pg_stat_statements</div>;
   if (queries.length === 0) {
@@ -878,18 +946,45 @@ function SlowQueriesPanel({ api, targetId }) {
 
   return (
     <div>
-      <div className="db-live-head">
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          type="search"
+          placeholder="Buscar en queries…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{
+            flex: '1 1 220px', minWidth: 180, padding: '6px 10px',
+            border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13,
+          }}
+        />
+        <span style={{ fontSize: 12, color: '#64748b' }}>{sorted.length} / {queries.length}</span>
+        <button type="button" onClick={onExportCSV}
+          disabled={sorted.length === 0}
+          style={{
+            padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1',
+            borderRadius: 6, background: 'white', cursor: 'pointer',
+          }}>Exportar CSV</button>
         <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
       </div>
       <div className="db-live-table-wrap">
         <table className="db-live-table">
           <thead><tr>
-            <th>Query</th><th>Calls</th><th>Total</th><th>Media</th><th>Máx</th><th>Cache hit</th>
+            <SortHeader label="Query"     sortKey="query"         currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+            <SortHeader label="Calls"     sortKey="calls"         currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+            <SortHeader label="Total"     sortKey="total_ms"      currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+            <SortHeader label="Media"     sortKey="mean_ms"       currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+            <SortHeader label="Máx"       sortKey="max_ms"        currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+            <SortHeader label="Cache hit" sortKey="cache_hit_pct" currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
           </tr></thead>
           <tbody>
-            {queries.map((q, i) => (
+            {sorted.map((q, i) => (
               <tr key={i}>
-                <td className="db-col-query" title={q.query}>{q.query}</td>
+                <td className="db-col-query"
+                    title="Click para ver query completa"
+                    style={{ cursor: 'pointer', textDecoration: 'underline dotted #94a3b8' }}
+                    onClick={() => setModalQuery(q)}>
+                  {q.query}
+                </td>
                 <td className="db-col-pid">{q.calls.toLocaleString()}</td>
                 <td className="db-col-dur">{formatDuration(Math.round(q.total_ms))}</td>
                 <td className="db-col-dur" style={{ color: q.mean_ms > 1000 ? '#f59e0b' : undefined }}>
@@ -906,6 +1001,30 @@ function SlowQueriesPanel({ api, targetId }) {
           </tbody>
         </table>
       </div>
+      {modalQuery && (
+        <Modal title="Query completa" onClose={() => setModalQuery(null)}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 12, color: '#475569' }}>
+              <span>Calls: <strong>{modalQuery.calls.toLocaleString()}</strong></span>
+              <span>Total: <strong>{formatDuration(Math.round(modalQuery.total_ms))}</strong></span>
+              <span>Media: <strong>{formatDuration(Math.round(modalQuery.mean_ms))}</strong></span>
+              <span>Máx: <strong>{formatDuration(Math.round(modalQuery.max_ms))}</strong></span>
+              <span>Cache hit: <strong>{modalQuery.cache_hit_pct.toFixed(1)}%</strong></span>
+            </div>
+            <pre style={{
+              background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 6,
+              fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              maxHeight: '60vh', overflow: 'auto',
+            }}>{modalQuery.query}</pre>
+            <button type="button"
+              onClick={() => { navigator.clipboard?.writeText(modalQuery.query); }}
+              style={{
+                alignSelf: 'flex-start', padding: '6px 12px', fontSize: 12,
+                border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer',
+              }}>Copiar query</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
