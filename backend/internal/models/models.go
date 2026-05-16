@@ -436,6 +436,39 @@ type RedisKeyspace struct {
 	Expires int64  `json:"expires"`
 }
 
+type RedisSlowlogEntry struct {
+	ID            int64  `json:"id"`
+	Timestamp     int64  `json:"timestamp"`
+	DurationMicro int64  `json:"duration_micro"`
+	Command       string `json:"command"`
+	ClientAddr    string `json:"client_addr,omitempty"`
+	ClientName    string `json:"client_name,omitempty"`
+}
+
+type RedisClient struct {
+	ID       int64  `json:"id"`
+	Addr     string `json:"addr"`
+	Name     string `json:"name,omitempty"`
+	AgeSec   int64  `json:"age_sec"`
+	IdleSec  int64  `json:"idle_sec"`
+	DB       int    `json:"db"`
+	Cmd      string `json:"cmd,omitempty"`
+	Flags    string `json:"flags,omitempty"`
+	SubCount int    `json:"sub_count,omitempty"`
+}
+
+type RedisMemoryStats struct {
+	TotalAllocated   int64             `json:"total_allocated"`
+	StartupAllocated int64             `json:"startup_allocated"`
+	OverheadTotal    int64             `json:"overhead_total"`
+	KeysCount        int64             `json:"keys_count"`
+	ClientsTotal     int64             `json:"clients_total"`
+	AofBufferTotal   int64             `json:"aof_buffer_total"`
+	ReplicaBuf       int64             `json:"replica_buf"`
+	FragRatio        float64           `json:"frag_ratio"`
+	Extra            map[string]string `json:"extra,omitempty"`
+}
+
 type PGReplicaInfo struct {
 	AppName     string `json:"app_name"`
 	ClientAddr  string `json:"client_addr"`
