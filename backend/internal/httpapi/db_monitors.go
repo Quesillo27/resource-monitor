@@ -14,6 +14,14 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func validDBType(t string) bool {
+	switch t {
+	case "postgres", "redis", "mysql", "mariadb", "sqlite":
+		return true
+	}
+	return false
+}
+
 func (s *Server) listDBTargets(w http.ResponseWriter, r *http.Request) {
 	targets, err := s.store.ListDatabaseTargets(r.Context())
 	if err != nil {
@@ -36,8 +44,8 @@ func (s *Server) createDBTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and dsn are required", http.StatusBadRequest)
 		return
 	}
-	if t.Type != "postgres" && t.Type != "redis" {
-		http.Error(w, "type must be postgres or redis", http.StatusBadRequest)
+	if !validDBType(t.Type) {
+		http.Error(w, "type must be postgres, redis, mysql, mariadb or sqlite", http.StatusBadRequest)
 		return
 	}
 	created, err := s.store.CreateDatabaseTarget(r.Context(), t)
@@ -56,8 +64,8 @@ func (s *Server) updateDBTarget(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	if t.Type != "" && t.Type != "postgres" && t.Type != "redis" {
-		http.Error(w, "type must be postgres or redis", http.StatusBadRequest)
+	if t.Type != "" && !validDBType(t.Type) {
+		http.Error(w, "type must be postgres, redis, mysql, mariadb or sqlite", http.StatusBadRequest)
 		return
 	}
 	// If client returned the masked DSN, preserve the original from DB

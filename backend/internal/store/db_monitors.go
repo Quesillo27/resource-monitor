@@ -405,6 +405,10 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 				sample = collectPostgresDB(ctx, pt.dsn)
 			case "redis":
 				sample = collectRedisDB(ctx, pt.dsn, pt.params["password"])
+			case "mysql", "mariadb":
+				sample = collectMySQLDB(ctx, pt.dsn)
+			case "sqlite":
+				sample = collectSQLiteDB(ctx, pt.dsn)
 			default:
 				sample = models.DatabaseSample{OK: false, ErrorMessage: fmt.Sprintf("unsupported type: %s", pt.dbType)}
 			}
