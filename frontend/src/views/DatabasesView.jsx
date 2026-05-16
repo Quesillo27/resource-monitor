@@ -170,8 +170,66 @@ function enrichSamples(samples) {
   return out.reverse(); // volver a DESC para que el resto del codigo no cambie
 }
 
-function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, suffix = '' }) {
+// monotone cubic spline — devuelve un path SVG suavizado a partir de puntos {x, y}.
+// Evita oscilaciones (overshoot) que sí tendrían splines naturales/Catmull-Rom.
+function monotonePath(pts) {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) return `M${pts[0].x},${pts[0].y} L${pts[1].x},${pts[1].y}`;
+  const n = pts.length;
+  const dx = [], dy = [], m = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i] = pts[i+1].x - pts[i].x;
+    dy[i] = pts[i+1].y - pts[i].y;
+    m[i] = dy[i] / (dx[i] || 1);
+  }
+  const tan = new Array(n).fill(0);
+  tan[0] = m[0];
+  tan[n-1] = m[n-2];
+  for (let i = 1; i < n - 1; i++) {
+    if (m[i-1] * m[i] <= 0) tan[i] = 0;
+    else tan[i] = (m[i-1] + m[i]) / 2;
+  }
+  for (let i = 0; i < n - 1; i++) {
+    if (m[i] === 0) { tan[i] = 0; tan[i+1] = 0; }
+    else {
+      const a = tan[i] / m[i], b = tan[i+1] / m[i];
+      const h = a*a + b*b;
+      if (h > 9) {
+        const t = 3 / Math.sqrt(h);
+        tan[i] = t * a * m[i];
+        tan[i+1] = t * b * m[i];
+      }
+    }
+  }
+  let d = `M${pts[0].x.toFixed(2)},${pts[0].y.toFixed(2)}`;
+  for (let i = 0; i < n - 1; i++) {
+    const dxi = (pts[i+1].x - pts[i].x) / 3;
+    const x1 = pts[i].x + dxi;
+    const y1 = pts[i].y + dxi * tan[i];
+    const x2 = pts[i+1].x - dxi;
+    const y2 = pts[i+1].y - dxi * tan[i+1];
+    d += ` C${x1.toFixed(2)},${y1.toFixed(2)} ${x2.toFixed(2)},${y2.toFixed(2)} ${pts[i+1].x.toFixed(2)},${pts[i+1].y.toFixed(2)}`;
+  }
+  return d;
+}
+
+function fmtNum(v, suffix) {
+  if (v == null || isNaN(v)) return '—';
+  const abs = Math.abs(v);
+  if (suffix === '%' || suffix === ' %') return `${v.toFixed(1)}%`;
+  if (abs >= 1e6) return `${(v/1e6).toFixed(2)}M${suffix || ''}`;
+  if (abs >= 1e4) return `${Math.round(v/1000)}k${suffix || ''}`;
+  if (abs >= 100) return `${Math.round(v)}${suffix || ''}`;
+  if (abs >= 10)  return `${v.toFixed(1)}${suffix || ''}`;
+  return `${v.toFixed(2)}${suffix || ''}`;
+}
+
+function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, suffix = '', height = 140, area = true, smooth = true }) {
   const [hoverIndex, setHoverIndex] = useState(null);
+  const gradientId = useMemo(
+    () => `lc-grad-${field}-${Math.random().toString(36).slice(2, 8)}`,
+    [field],
+  );
 
   const points = useMemo(
     () => [...samples].reverse()
@@ -180,77 +238,113 @@ function LineChart({ samples, field, color = '#3b82f6', label = '', scale = 1, s
     [samples, field, scale]
   );
 
-  const { yMin, yMax, range } = useMemo(() => {
-    if (points.length === 0) return { yMin: 0, yMax: 1, range: 1 };
+  const { yMin, range, current, delta, deltaPct, peak } = useMemo(() => {
+    if (points.length === 0) return { yMin: 0, range: 1, current: null, delta: 0, deltaPct: 0, peak: 0 };
     const vals = points.map(p => p.v);
     const mn = Math.min(...vals);
     const mx = Math.max(...vals);
-    // Pad range so the line isn't pinned to edges
     const span = mx - mn;
     const pad = span === 0 ? Math.max(1, Math.abs(mx) * 0.1) : span * 0.15;
-    return { yMin: mn - pad, yMax: mx + pad, range: (mx + pad) - (mn - pad) || 1 };
+    const cur = vals[vals.length - 1];
+    const first = vals[0];
+    const d = cur - first;
+    const dp = first !== 0 ? (d / Math.abs(first)) * 100 : 0;
+    return { yMin: mn - pad, range: (mx + pad) - (mn - pad) || 1, current: cur, delta: d, deltaPct: dp, peak: mx };
   }, [points]);
 
-  const fmt = (v) => suffix === '%' ? `${v.toFixed(1)}%` : `${Math.round(v)}${suffix}`;
-
-  const linePath = useMemo(() => {
-    if (points.length < 2) return '';
-    const maxI = points.length - 1;
-    return points.map((p, i) => {
-      const x = (i / maxI) * 100;
-      const y = 48 - ((p.v - yMin) / range) * 40;
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
-    }).join('');
+  // Coordenadas en viewBox 100x52 (8..48 utilizable verticalmente)
+  const coords = useMemo(() => {
+    if (points.length === 0) return [];
+    const maxI = Math.max(points.length - 1, 1);
+    return points.map((p, i) => ({
+      x: (i / maxI) * 100,
+      y: 48 - ((p.v - yMin) / range) * 40,
+      v: p.v,
+      t: p.t,
+    }));
   }, [points, yMin, range]);
 
+  const linePath = useMemo(
+    () => smooth ? monotonePath(coords) : coords.map((c, i) => `${i === 0 ? 'M' : 'L'}${c.x.toFixed(2)},${c.y.toFixed(2)}`).join(''),
+    [coords, smooth],
+  );
+
+  const areaPath = useMemo(() => {
+    if (!area || coords.length < 2) return '';
+    return `${linePath} L${coords[coords.length-1].x.toFixed(2)},48 L${coords[0].x.toFixed(2)},48 Z`;
+  }, [linePath, coords, area]);
+
   const yTicks = useMemo(
-    () => [1, 0.75, 0.5, 0.25, 0].map(r => fmt(yMin + range * r)),
+    () => [1, 0.5, 0].map(r => fmtNum(yMin + range * r, suffix)),
     [yMin, range, suffix]
   );
 
   const xTicks = useMemo(() => {
     if (points.length === 0) return [];
     const maxI = Math.max(points.length - 1, 1);
-    return [0, 0.25, 0.5, 0.75, 1].map(r => points[Math.round(r * maxI)]?.t).filter(Boolean).map(fmtTimeShort);
+    return [0, 0.5, 1].map(r => points[Math.round(r * maxI)]?.t).filter(Boolean).map(fmtTimeShort);
   }, [points]);
 
   if (points.length < 2) {
     return <div className="empty-chart">Sin historial disponible</div>;
   }
 
-  const activePoint = hoverIndex === null ? null : points[hoverIndex];
-  const activeX = hoverIndex === null ? 0 : (hoverIndex / (points.length - 1)) * 100;
-  const activeY = activePoint ? 48 - ((activePoint.v - yMin) / range) * 40 : 0;
-
+  const activePoint = hoverIndex === null ? null : coords[hoverIndex];
   const setHover = (e) => {
     const b = e.currentTarget.getBoundingClientRect();
     const r = Math.max(0, Math.min(1, (e.clientX - b.left) / b.width));
-    setHoverIndex(Math.round(r * (points.length - 1)));
+    setHoverIndex(Math.round(r * (coords.length - 1)));
   };
 
+  const trendUp = delta > 0;
+  const trendColor = Math.abs(deltaPct) < 1 ? '#94a3b8' : trendUp ? '#16a34a' : '#dc2626';
+  const trendArrow = Math.abs(deltaPct) < 1 ? '→' : trendUp ? '▲' : '▼';
+
   return (
-    <div className="chart-shell">
-      <div className="legend"><span><i style={{ background: color }} />{label}</span></div>
-      <div className="chart-frame">
-        <div className="chart-axis y-axis">{yTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
-        <div className="chart-plot" onMouseMove={setHover} onMouseLeave={() => setHoverIndex(null)}>
-          <svg className="chart" viewBox="0 0 100 52" preserveAspectRatio="none">
-            <path d="M0 8 H100" /><path d="M0 18 H100" /><path d="M0 28 H100" /><path d="M0 38 H100" /><path d="M0 48 H100" />
-            {activePoint && <line className="chart-cursor" x1={activeX} x2={activeX} y1="8" y2="48" />}
-            <path className="chart-line" d={linePath} style={{ stroke: color, fill: 'none' }} />
+    <div className="lc-shell" style={{ '--lc-color': color }}>
+      <div className="lc-head">
+        <div className="lc-label">
+          <i style={{ background: color }} />
+          <span>{label}</span>
+        </div>
+        <div className="lc-stats">
+          <strong>{fmtNum(current, suffix)}</strong>
+          <span className="lc-delta" style={{ color: trendColor }}>
+            {trendArrow} {fmtNum(Math.abs(delta), suffix)}
+            {Math.abs(deltaPct) >= 1 && ` (${deltaPct > 0 ? '+' : ''}${deltaPct.toFixed(0)}%)`}
+          </span>
+        </div>
+      </div>
+      <div className="lc-frame">
+        <div className="lc-yaxis">{yTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
+        <div className="lc-plot" style={{ height }} onMouseMove={setHover} onMouseLeave={() => setHoverIndex(null)}>
+          <svg className="lc-svg" viewBox="0 0 100 52" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stopColor={color} stopOpacity="0.32"/>
+                <stop offset="100%" stopColor={color} stopOpacity="0.02"/>
+              </linearGradient>
+            </defs>
+            {/* grid lines */}
+            <path className="lc-grid" d="M0 8 H100 M0 28 H100 M0 48 H100"/>
+            {area && <path d={areaPath} fill={`url(#${gradientId})`} stroke="none"/>}
+            <path className="lc-line" d={linePath} style={{ stroke: color }}/>
             {activePoint && (
-              <circle cx={activeX} cy={activeY} r="1.4" style={{ fill: color, stroke: 'none' }} />
+              <>
+                <line className="lc-cursor" x1={activePoint.x} x2={activePoint.x} y1="8" y2="48"/>
+                <circle cx={activePoint.x} cy={activePoint.y} r="1.6" style={{ fill: color, stroke: 'white', strokeWidth: 0.6 }}/>
+              </>
             )}
           </svg>
           {activePoint && (
-            <div className="chart-tooltip" style={{ left: `${Math.min(Math.max(activeX, 12), 88)}%` }}>
+            <div className="lc-tip" style={{ left: `${Math.min(Math.max(activePoint.x, 14), 86)}%` }}>
               <strong>{fmtTimeShort(activePoint.t)}</strong>
-              <span><i style={{ background: color }} />{label}<b>{fmt(activePoint.v)}</b></span>
+              <span style={{ color }}>{fmtNum(activePoint.v, suffix)}</span>
             </div>
           )}
         </div>
       </div>
-      <div className="chart-scale">{xTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
+      <div className="lc-xaxis">{xTicks.map((t, i) => <span key={i}>{t}</span>)}</div>
     </div>
   );
 }
@@ -1698,6 +1792,108 @@ function InsightsPanel({ api, targetId }) {
   );
 }
 
+// ── TrendsPanel ───────────────────────────────────────────────────────────────
+
+const TREND_RANGES = [
+  { key: '15m', label: '15 min', minutes: 15 },
+  { key: '1h',  label: '1 h',    minutes: 60 },
+  { key: '3h',  label: '3 h',    minutes: 180 },
+  { key: 'all', label: 'Todo',   minutes: null },
+];
+
+function TrendsPanel({ samples, isPG }) {
+  const [rangeKey, setRangeKey] = useState('1h');
+  const range = TREND_RANGES.find(r => r.key === rangeKey) || TREND_RANGES[1];
+
+  const filtered = useMemo(() => {
+    if (range.minutes == null) return samples;
+    const cutoff = Date.now() - range.minutes * 60 * 1000;
+    return samples.filter(s => new Date(s.captured_at).getTime() >= cutoff);
+  }, [samples, range]);
+
+  const has = (pred) => filtered.some(pred);
+
+  const charts = [
+    {
+      key: 'connections',
+      show: filtered.length >= 2,
+      props: {
+        field: isPG ? 'connections_total' : 'connected_clients',
+        color: isPG ? '#3b82f6' : '#ef4444',
+        label: isPG ? 'Conexiones' : 'Clientes',
+      },
+    },
+    {
+      key: 'cache',
+      show: isPG && has(s => s.cache_hit_ratio != null),
+      props: { field: 'cache_hit_ratio', color: '#22c55e', label: 'Cache hit', scale: 100, suffix: '%' },
+    },
+    {
+      key: 'tps',
+      show: isPG && has(s => s._tps != null),
+      props: { field: '_tps', color: '#8b5cf6', label: 'TPS', suffix: '/s' },
+    },
+    {
+      key: 'pool',
+      show: isPG && has(s => s._conn_pct != null),
+      props: { field: '_conn_pct', color: '#f59e0b', label: 'Pool conexiones', suffix: '%' },
+    },
+    {
+      key: 'slow',
+      show: isPG && has(s => (s.slow_queries ?? 0) > 0),
+      props: { field: 'slow_queries', color: '#ef4444', label: 'Queries lentas activas' },
+    },
+    {
+      key: 'p95',
+      show: isPG && has(s => s.slow_query_p95_ms != null),
+      props: { field: 'slow_query_p95_ms', color: '#0ea5e9', label: 'Latencia p95', suffix: ' ms' },
+    },
+    {
+      key: 'deadlocks',
+      show: isPG && has(s => s._deadlocks_delta != null && s._deadlocks_delta > 0),
+      props: { field: '_deadlocks_delta', color: '#dc2626', label: 'Deadlocks por intervalo' },
+    },
+    {
+      key: 'dbsize',
+      show: isPG && has(s => s.db_size_bytes != null),
+      props: { field: 'db_size_bytes', color: '#14b8a6', label: 'Tamaño BD', scale: 1/(1024*1024), suffix: ' MB' },
+    },
+    {
+      key: 'locks',
+      show: isPG && has(s => (s.active_locks ?? 0) > 0),
+      props: { field: 'active_locks', color: '#a855f7', label: 'Locks en espera' },
+    },
+  ].filter(c => c.show);
+
+  return (
+    <Panel title={`Tendencias${charts.length > 0 ? ` · ${charts.length}` : ''}`}>
+      <div className="db-trends-toolbar">
+        <span className="range-label">Rango:</span>
+        <div className="db-trends-range">
+          {TREND_RANGES.map(r => (
+            <button key={r.key} type="button"
+              className={r.key === rangeKey ? 'active' : ''}
+              onClick={() => setRangeKey(r.key)}>{r.label}</button>
+          ))}
+        </div>
+        <span className="db-trends-meta">
+          {filtered.length} {filtered.length === 1 ? 'muestra' : 'muestras'}
+          {filtered.length < samples.length && ` (de ${samples.length})`}
+        </span>
+      </div>
+      {filtered.length < 2 ? (
+        <div className="empty-chart">Sin suficientes muestras en el rango seleccionado</div>
+      ) : (
+        <div className="db-trends-grid">
+          {charts.map(c => (
+            <LineChart key={c.key} samples={filtered} {...c.props}/>
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 // ── TargetDetail ──────────────────────────────────────────────────────────────
 
 function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
@@ -1770,77 +1966,7 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
             {loading && !latest ? <Skeleton/> : <MetricsCard target={target} sample={latest}/>}
           </Panel>
           {samples.length >= 3 && (
-            <Panel title={isPG ? 'Conexiones en el tiempo' : 'Clientes en el tiempo'}>
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field={isPG ? 'connections_total' : 'connected_clients'}
-                  color={isPG ? '#3b82f6' : '#ef4444'}
-                  label={isPG ? 'Conexiones totales' : 'Clientes conectados'}/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.length >= 3 && (
-            <Panel title="Cache hit ratio">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="cache_hit_ratio"
-                  color="#22c55e" label="Cache hit (%)" scale={100} suffix="%"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => s._tps != null) && (
-            <Panel title="Transacciones por segundo (TPS)">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="_tps"
-                  color="#8b5cf6" label="TPS" suffix="/s"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => s._conn_pct != null) && (
-            <Panel title="% Uso del pool de conexiones">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="_conn_pct"
-                  color="#f59e0b" label="Conexiones / max_connections" suffix="%"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => (s.slow_queries ?? 0) > 0) && (
-            <Panel title="Queries lentas en el tiempo">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="slow_queries"
-                  color="#ef4444" label="Queries activas > 5s"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => s._deadlocks_delta != null && s._deadlocks_delta > 0) && (
-            <Panel title="Deadlocks por intervalo">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="_deadlocks_delta"
-                  color="#dc2626" label="Deadlocks nuevos"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => s.slow_query_p95_ms != null) && (
-            <Panel title="Latencia p95 (pg_stat_statements)">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="slow_query_p95_ms"
-                  color="#0ea5e9" label="p95 mean_exec_time" suffix=" ms"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => s.db_size_bytes != null) && (
-            <Panel title="Tamaño de la base de datos">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="db_size_bytes"
-                  color="#14b8a6" label="DB size" scale={1/(1024*1024)} suffix=" MB"/>
-              </div>
-            </Panel>
-          )}
-          {isPG && samples.some(s => (s.active_locks ?? 0) > 0) && (
-            <Panel title="Locks en espera">
-              <div className="db-chart-mini">
-                <LineChart samples={samples} field="active_locks"
-                  color="#a855f7" label="Locks ungranted"/>
-              </div>
-            </Panel>
+            <TrendsPanel samples={samples} isPG={isPG}/>
           )}
         </div>
       )}
