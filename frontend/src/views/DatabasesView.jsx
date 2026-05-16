@@ -1180,6 +1180,211 @@ function RedisLivePanel({ api, targetId }) {
   );
 }
 
+// ── RedisSlowlogPanel ─────────────────────────────────────────────────────────
+
+function RedisSlowlogPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/redis-slowlog?limit=100`),
+    [targetId],
+    LIVE_REFRESH_MS,
+  );
+  const [search, setSearch] = useState('');
+  const entries = data?.entries || [];
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return entries;
+    return entries.filter(e => `${e.command} ${e.client_addr || ''} ${e.client_name || ''}`.toLowerCase().includes(term));
+  }, [entries, search]);
+  const onExport = () => {
+    const rows = [
+      ['id', 'timestamp', 'duration_micro', 'command', 'client_addr', 'client_name'],
+      ...filtered.map(e => [e.id, e.timestamp, e.duration_micro, e.command, e.client_addr, e.client_name]),
+    ];
+    downloadCSV(rows, `redis-slowlog-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo obtener SLOWLOG (¿permisos / version Redis?)</div>;
+  if (entries.length === 0) return <div className="db-live-empty">SLOWLOG vacío — sin comandos lentos registrados</div>;
+  return (
+    <div className="db-live-table-wrap">
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <input type="search" placeholder="Filtrar comando…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}/>
+        <span style={{ fontSize: 12, color: '#64748b' }}>{filtered.length} / {entries.length}</span>
+        <button type="button" onClick={onExport} disabled={filtered.length === 0}
+          style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer' }}>Exportar CSV</button>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      <table className="db-live-table">
+        <thead><tr>
+          <th>ID</th><th>Hora</th><th>Duración</th><th>Comando</th><th>Cliente</th>
+        </tr></thead>
+        <tbody>
+          {filtered.map((e, i) => (
+            <tr key={i}>
+              <td className="db-col-pid">{e.id}</td>
+              <td className="db-col-time">{new Date(e.timestamp * 1000).toLocaleTimeString()}</td>
+              <td className="db-col-dur" style={{ color: e.duration_micro > 100000 ? '#ef4444' : e.duration_micro > 10000 ? '#f59e0b' : undefined }}>
+                {e.duration_micro >= 1000 ? `${(e.duration_micro / 1000).toFixed(1)} ms` : `${e.duration_micro} µs`}
+              </td>
+              <td className="db-col-query" title={e.command} style={{ fontFamily: 'monospace', fontSize: 12 }}>{e.command}</td>
+              <td className="db-col-app">{e.client_addr || e.client_name || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── RedisClientsPanel ─────────────────────────────────────────────────────────
+
+function RedisClientsPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/redis-clients`),
+    [targetId],
+    LIVE_REFRESH_MS,
+  );
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState('idle_sec');
+  const [sortDir, setSortDir] = useState('desc');
+  const clients = data?.clients || [];
+  const sortBy = (k) => {
+    if (k === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(k); setSortDir('desc'); }
+  };
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    if (!term) return clients;
+    return clients.filter(c => `${c.addr} ${c.name || ''} ${c.cmd || ''} ${c.flags || ''}`.toLowerCase().includes(term));
+  }, [clients, search]);
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const av = a[sortKey] ?? 0, bv = b[sortKey] ?? 0;
+      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortDir === 'asc' ? (av - bv) : (bv - av);
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+  const onExport = () => {
+    const rows = [
+      ['id', 'addr', 'name', 'age_sec', 'idle_sec', 'db', 'cmd', 'flags', 'sub_count'],
+      ...sorted.map(c => [c.id, c.addr, c.name, c.age_sec, c.idle_sec, c.db, c.cmd, c.flags, c.sub_count]),
+    ];
+    downloadCSV(rows, `redis-clients-${new Date().toISOString().slice(0,16).replace(':','-')}.csv`);
+  };
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo obtener CLIENT LIST</div>;
+  if (clients.length === 0) return <div className="db-live-empty">Sin clientes conectados</div>;
+  return (
+    <div className="db-live-table-wrap">
+      <div className="db-live-head" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <input type="search" placeholder="Filtrar (addr/name/cmd/flags)…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ flex: '1 1 220px', minWidth: 180, padding: '6px 10px', border: '1px solid #cbd5e1', borderRadius: 6, fontSize: 13 }}/>
+        <span style={{ fontSize: 12, color: '#64748b' }}>{sorted.length} / {clients.length}</span>
+        <button type="button" onClick={onExport} disabled={sorted.length === 0}
+          style={{ padding: '6px 12px', fontSize: 12, border: '1px solid #cbd5e1', borderRadius: 6, background: 'white', cursor: 'pointer' }}>Exportar CSV</button>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      <table className="db-live-table">
+        <thead><tr>
+          <SortHeader label="ID"    sortKey="id"       currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Addr"  sortKey="addr"     currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Name"  sortKey="name"     currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Edad"  sortKey="age_sec"  currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Idle"  sortKey="idle_sec" currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="DB"    sortKey="db"       currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Cmd"   sortKey="cmd"      currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+          <SortHeader label="Flags" sortKey="flags"    currentKey={sortKey} currentDir={sortDir} onSort={sortBy}/>
+        </tr></thead>
+        <tbody>
+          {sorted.map((c, i) => (
+            <tr key={i}>
+              <td className="db-col-pid">{c.id}</td>
+              <td className="db-col-app" style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.addr}</td>
+              <td>{c.name || <span className="db-na">—</span>}</td>
+              <td className="db-col-pid">{c.age_sec}s</td>
+              <td className="db-col-pid" style={{ color: c.idle_sec > 300 ? '#f59e0b' : undefined }}>{c.idle_sec}s</td>
+              <td className="db-col-pid">{c.db}</td>
+              <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{c.cmd || <span className="db-na">—</span>}</td>
+              <td style={{ fontSize: 11, color: '#64748b' }}>{c.flags || <span className="db-na">—</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── RedisMemoryPanel ──────────────────────────────────────────────────────────
+
+function RedisMemoryPanel({ api, targetId }) {
+  const { data, loading, reload, lastUpdated } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/redis-memory`),
+    [targetId],
+    LIVE_REFRESH_MS,
+  );
+  if (loading && !data) return <Skeleton/>;
+  if (!data) return <div className="db-live-err">No se pudo obtener MEMORY STATS</div>;
+  return (
+    <div>
+      <div className="db-live-head" style={{ marginBottom: 8 }}>
+        <RefreshMeta lastUpdated={lastUpdated} loading={loading} onRefresh={reload}/>
+      </div>
+      <div className="db-metrics-grid">
+        <div className="db-metric-tile" title="Memoria total asignada por Redis">
+          <span>Total allocated</span><strong>{bytes(data.total_allocated)}</strong>
+        </div>
+        <div className="db-metric-tile" title="Memoria base al iniciar (overhead del runtime)">
+          <span>Startup allocated</span><strong>{bytes(data.startup_allocated)}</strong>
+        </div>
+        <div className="db-metric-tile" title="Overhead total: bookkeeping + buffers - datos">
+          <span>Overhead</span><strong>{bytes(data.overhead_total)}</strong>
+        </div>
+        <div className="db-metric-tile">
+          <span>Keys count</span><strong>{Number(data.keys_count).toLocaleString()}</strong>
+        </div>
+        <div className="db-metric-tile">
+          <span>Buffers clientes</span><strong>{bytes(data.clients_total)}</strong>
+        </div>
+        <div className="db-metric-tile">
+          <span>Buffer AOF</span><strong>{bytes(data.aof_buffer_total)}</strong>
+        </div>
+        <div className="db-metric-tile">
+          <span>Backlog replica</span><strong>{bytes(data.replica_buf)}</strong>
+        </div>
+        <div className="db-metric-tile" title="Ratio fragmentación RSS/used. Ideal: ~1.0. >1.5 fragmentado">
+          <span>Fragmentación</span>
+          <strong style={{ color: data.frag_ratio > 2 ? '#ef4444' : data.frag_ratio > 1.5 ? '#f59e0b' : '#22c55e' }}>
+            {data.frag_ratio > 0 ? data.frag_ratio.toFixed(2) : '—'}
+          </strong>
+        </div>
+      </div>
+      {data.extra && Object.keys(data.extra).length > 0 && (
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#64748b' }}>
+            Otros campos MEMORY STATS ({Object.keys(data.extra).length})
+          </summary>
+          <div className="db-live-table-wrap" style={{ marginTop: 8 }}>
+            <table className="db-live-table">
+              <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
+              <tbody>
+                {Object.entries(data.extra).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => (
+                  <tr key={k}>
+                    <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{k}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // ── ReplicationPanel ──────────────────────────────────────────────────────────
 
 function ReplicationPanel({ api, targetId }) {
@@ -1526,9 +1731,20 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
           {isPG ? (
             <ActiveQueriesPanel api={api} targetId={target.id}/>
           ) : (
-            <Panel title="Info Redis en vivo">
-              <RedisLivePanel api={api} targetId={target.id}/>
-            </Panel>
+            <>
+              <Panel title="Info Redis en vivo">
+                <RedisLivePanel api={api} targetId={target.id}/>
+              </Panel>
+              <Panel title="SLOWLOG (comandos lentos)">
+                <RedisSlowlogPanel api={api} targetId={target.id}/>
+              </Panel>
+              <Panel title="Clientes conectados">
+                <RedisClientsPanel api={api} targetId={target.id}/>
+              </Panel>
+              <Panel title="MEMORY STATS">
+                <RedisMemoryPanel api={api} targetId={target.id}/>
+              </Panel>
+            </>
           )}
         </div>
       )}
