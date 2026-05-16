@@ -2168,6 +2168,8 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
             </label>
           </div>
         </div>
+
+        {!isNew && <HostAgentSection api={api} targetId={initial.id}/>}
       </div>
 
       {error && <div className="status-msg err" style={{ marginBottom: 0 }}>{error}</div>}
@@ -2392,15 +2394,25 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
   const isMY    = target.type === 'mysql' || target.type === 'mariadb';
   const isSL    = target.type === 'sqlite';
 
+  // Host agent (Fase 1 — datos del agente vinculado al target, si existe).
+  // El tab "Host" solo aparece si hay un agente registrado.
+  const { data: hostData } = useLoad(
+    () => api.get(`/api/db-targets/${target.id}/host?minutes=180`),
+    [target.id],
+    DB_REFRESH_MS,
+  );
+  const hostAgent   = hostData?.agent || null;
+  const hostSamples = hostData?.samples || [];
+
   // Tabs disponibles según el tipo
   // Postgres: full feature set (rutas PG-specific funcionan)
   // Redis:    resumen + en-vivo (4 paneles redis) + historial
   // MySQL/MariaDB: resumen + historial — endpoints avanzados no implementados aún
   // SQLite:   resumen + historial — engine embebido sin live ops remotas
-  const pgTabs  = ['resumen', 'en-vivo', 'servidor', 'almacenamiento', 'diagnostico', 'historial'];
-  const rdTabs  = ['resumen', 'en-vivo', 'historial'];
-  const myTabs  = ['resumen', 'historial'];
-  const tabs    = isPG ? pgTabs : isRD ? rdTabs : myTabs;
+  const baseTabs = isPG ? ['resumen', 'en-vivo', 'servidor', 'almacenamiento', 'diagnostico', 'historial']
+                  : isRD ? ['resumen', 'en-vivo', 'historial']
+                  :        ['resumen', 'historial'];
+  const tabs = hostAgent ? [...baseTabs, 'host'] : baseTabs;
 
   const tabLabels = {
     'resumen':        'Resumen',
@@ -2409,6 +2421,7 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
     'almacenamiento': 'Almacenamiento',
     'diagnostico':    'Diagnóstico',
     'historial':      'Historial',
+    'host':           'Host',
   };
 
   return (
@@ -2639,6 +2652,248 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
           )}
         </div>
       )}
+
+      {/* ══ HOST ══ */}
+      {tab === 'host' && hostAgent && (
+        <div className="db-tab-content">
+          <HostTab agent={hostAgent} samples={hostSamples}/>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Host Agent Section (drawer) ───────────────────────────────────────────────
+// Aparece dentro del drawer al editar un target existente. Muestra el estado
+// del agente vinculado o un botón para generar un token de enrollment.
+
+function HostAgentSection({ api, targetId }) {
+  const { data, reload } = useLoad(
+    () => api.get(`/api/db-targets/${targetId}/host?limit=1`),
+    [targetId],
+    DB_REFRESH_MS,
+  );
+  const agent = data?.agent || null;
+  const [installModal, setInstallModal] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function generateToken() {
+    setBusy(true);
+    try {
+      const res = await api.post(`/api/db-targets/${targetId}/host-tokens`, {});
+      setInstallModal(res);
+    } catch (e) {
+      alert(`No se pudo generar token: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unlinkAgent() {
+    if (!confirm('¿Desvincular el agente? Se borrarán todas las muestras del host.')) return;
+    setBusy(true);
+    try {
+      await api.delete(`/api/db-targets/${targetId}/host`);
+      reload();
+    } catch (e) {
+      alert(`No se pudo desvincular: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="db-form-field" style={{ marginTop: 8, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+      <span className="db-form-label">Agente del host</span>
+
+      {agent ? (
+        <div style={{ display: 'grid', gap: 6, padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <strong>{agent.hostname || 'sin hostname'}</strong>
+            <span style={{
+              padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600,
+              background: agent.status === 'online' ? '#dcfce7' : '#fee2e2',
+              color: agent.status === 'online' ? '#166534' : '#991b1b',
+            }}>
+              {agent.status === 'online' ? '● ONLINE' : '○ OFFLINE'}
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+            <span>SO: <strong>{agent.os || '—'}/{agent.arch || '—'}</strong></span>
+            <span>Motor: <strong>{agent.engine || '—'}</strong></span>
+            <span>Versión agente: <strong>{agent.agent_version || '—'}</strong></span>
+            <span>Última conexión: <strong>{agent.last_seen_at ? new Date(agent.last_seen_at).toLocaleString() : '—'}</strong></span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button type="button" className="db-form-btn" onClick={generateToken} disabled={busy}>
+              Rotar credencial / reinstalar
+            </button>
+            <button type="button" className="db-form-btn" style={{ color: 'var(--red)' }} onClick={unlinkAgent} disabled={busy}>
+              Desvincular
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gap: 8, padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Sin agente vinculado. Instalar uno permite ver métricas del servidor de la BD
+            (espacio del datadir, OOM kills, logs PG, I/O del disco) que el polling remoto no puede obtener.
+          </span>
+          <button type="button" className="db-form-btn db-form-btn-primary" onClick={generateToken} disabled={busy}>
+            {busy ? 'Generando…' : 'Vincular host'}
+          </button>
+        </div>
+      )}
+
+      {installModal && (
+        <HostInstallModal token={installModal} onClose={() => { setInstallModal(null); reload(); }}/>
+      )}
+    </div>
+  );
+}
+
+// HostInstallModal muestra el comando one-shot tras generar el token.
+function HostInstallModal({ token, onClose }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(token.install_command || token.token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (_) {}
+  }
+  return (
+    <Modal title="Instalar agente en el host de la BD" onClose={onClose}>
+      <div style={{ display: 'grid', gap: 12 }}>
+        <p style={{ margin: 0, fontSize: 13 }}>
+          Ejecutá este comando en el servidor donde corre la BD. El token vence el {new Date(token.expires_at).toLocaleString()}.
+        </p>
+        <pre style={{
+          background: '#0f172a', color: '#e2e8f0', padding: 12, borderRadius: 8,
+          fontSize: 12, fontFamily: 'ui-monospace, monospace', overflow: 'auto', margin: 0,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+        }}>{token.install_command || `--token=${token.token}`}</pre>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" onClick={copy}>{copied ? '✓ Copiado' : 'Copiar comando'}</button>
+          <button type="button" className="primary" onClick={onClose}>Listo</button>
+        </div>
+        <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>
+          El agente se autoinstala como servicio systemd y reporta cada 60s. Si reinstalás,
+          generá un token nuevo desde acá — el viejo solo sirve una vez.
+        </p>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Host Tab ──────────────────────────────────────────────────────────────────
+// Render del tab "Host" dentro del detalle del target. Muestra las métricas
+// que solo el agente en el mismo host puede ver.
+
+function HostTab({ agent, samples }) {
+  const latest = samples[0] || null;
+
+  if (!latest) {
+    return <div className="db-live-empty"><span>Agente vinculado pero aún sin muestras. Esperando primer heartbeat…</span></div>;
+  }
+
+  const fsTone = (pct) => pct == null ? '' : pct >= 90 ? '#dc2626' : pct >= 80 ? '#f59e0b' : '#16a34a';
+  const recentLogs = [];
+  for (const s of samples.slice(0, 30)) {
+    if (Array.isArray(s.log_events)) {
+      for (const e of s.log_events) recentLogs.push(e);
+    }
+  }
+  recentLogs.sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <Panel title={`Host: ${agent.hostname} (${agent.os}/${agent.arch})`}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          <HostStat label="FS datadir" value={latest.fs_used_pct != null ? `${latest.fs_used_pct.toFixed(1)}%` : '—'}
+            sub={latest.fs_free_bytes != null ? `${bytes(latest.fs_free_bytes)} libre` : ''}
+            color={fsTone(latest.fs_used_pct)}/>
+          <HostStat label="CPU proceso PG" value={latest.pg_cpu_pct != null ? `${latest.pg_cpu_pct.toFixed(1)}%` : '—'}/>
+          <HostStat label="RAM proceso PG" value={latest.pg_rss_bytes != null ? bytes(latest.pg_rss_bytes) : '—'}/>
+          <HostStat label="File descriptors" value={latest.pg_fd_used != null ? `${latest.pg_fd_used}` : '—'}
+            sub={latest.pg_fd_limit != null ? `de ${latest.pg_fd_limit}` : ''}/>
+          <HostStat label="WAL latency"
+            value={latest.wal_latency_ms != null ? `${latest.wal_latency_ms.toFixed(1)} ms` : '—'}/>
+          <HostStat label="OOM kills (Δ)"
+            value={latest.oom_kills_delta != null ? `${latest.oom_kills_delta}` : '—'}
+            color={(latest.oom_kills_delta ?? 0) > 0 ? '#dc2626' : ''}/>
+        </div>
+      </Panel>
+
+      <Panel title={`Eventos de log recientes (${recentLogs.length})`}>
+        {recentLogs.length === 0 ? (
+          <div className="db-live-empty"><span>Sin eventos relevantes en las últimas muestras.</span></div>
+        ) : (
+          <div className="db-history-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Hora</th>
+                  <th>Nivel</th>
+                  <th>Patrón</th>
+                  <th>Mensaje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentLogs.slice(0, 50).map((e, i) => (
+                  <tr key={i} className={e.level === 'FATAL' || e.level === 'PANIC' ? 'db-row-err' : ''}>
+                    <td className="db-col-time">{new Date(e.ts).toLocaleTimeString()}</td>
+                    <td><strong style={{ color: e.level === 'FATAL' || e.level === 'PANIC' ? '#dc2626' : '#f59e0b' }}>{e.level}</strong></td>
+                    <td><code style={{ fontSize: 11 }}>{e.pattern}</code></td>
+                    <td style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12 }}>{e.message?.slice(0, 200)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+
+      <Panel title={`Últimas ${Math.min(samples.length, 30)} muestras del host`}>
+        <div className="db-history-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Hora</th>
+                <th>FS</th>
+                <th>I/O leído</th>
+                <th>I/O escrito</th>
+                <th>OOM Δ</th>
+                <th>PG CPU</th>
+                <th>PG RAM</th>
+              </tr>
+            </thead>
+            <tbody>
+              {samples.slice(0, 30).map(s => (
+                <tr key={s.id} className={!s.ok ? 'db-row-err' : ''}>
+                  <td className="db-col-time">{new Date(s.captured_at).toLocaleTimeString()}</td>
+                  <td style={{ color: fsTone(s.fs_used_pct) }}>{s.fs_used_pct != null ? `${s.fs_used_pct.toFixed(1)}%` : '—'}</td>
+                  <td>{s.io_read_bytes != null ? bytes(s.io_read_bytes) : '—'}</td>
+                  <td>{s.io_write_bytes != null ? bytes(s.io_write_bytes) : '—'}</td>
+                  <td style={{ color: (s.oom_kills_delta ?? 0) > 0 ? '#dc2626' : '' }}>{s.oom_kills_delta ?? '—'}</td>
+                  <td>{s.pg_cpu_pct != null ? `${s.pg_cpu_pct.toFixed(1)}%` : '—'}</td>
+                  <td>{s.pg_rss_bytes != null ? bytes(s.pg_rss_bytes) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function HostStat({ label, value, sub, color }) {
+  return (
+    <div style={{ padding: 12, background: 'var(--bg-soft)', borderRadius: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: color || 'inherit', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
