@@ -137,7 +137,7 @@ func (s *Store) GetVacuumStats(ctx context.Context, id string) ([]models.VacuumS
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT
-			schemaname, tablename,
+			schemaname, relname,
 			COALESCE(n_live_tup, 0),
 			COALESCE(n_dead_tup, 0),
 			CASE WHEN n_live_tup + n_dead_tup > 0

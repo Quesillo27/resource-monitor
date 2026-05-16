@@ -279,12 +279,25 @@ func (s *Store) SeedDefaultDBAlertRules(ctx context.Context) error {
 	if err := s.ensureAlertRulesSchema(ctx); err != nil {
 		return err
 	}
-	// Asegurar el agent sentinel
-	_, _ = s.pool.Exec(ctx, `
-		INSERT INTO agents (id, hostname, enrolled_at, last_seen_at)
-		VALUES ($1::uuid, '__db_alert_sentinel__', now(), now())
+	// Asegurar el agent sentinel. La tabla `agents` tiene varios NOT NULL ademas
+	// de `id` (name, hostname, os, arch, credential_hash, primary_ip) — todos se
+	// rellenan con valores placeholder. El credential_hash es UNIQUE pero usamos
+	// uno fijo del sentinel para que ON CONFLICT atrape el caso de re-insert.
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO agents (
+			id, name, hostname, os, arch,
+			credential_hash, status, primary_ip,
+			created_at, updated_at
+		) VALUES (
+			$1::uuid, '__db_alert_sentinel__', '__db_alert_sentinel__', 'sentinel', 'sentinel',
+			'sentinel:db-alerts', 'system', '0.0.0.0',
+			now(), now()
+		)
 		ON CONFLICT (id) DO NOTHING
 	`, dbAlertSentinelAgentID)
+	if err != nil {
+		return fmt.Errorf("seed db sentinel agent: %w", err)
+	}
 
 	rules := []struct {
 		Metric      string
