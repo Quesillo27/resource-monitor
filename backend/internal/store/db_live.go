@@ -30,11 +30,15 @@ func (s *Store) GetPGLiveInfo(ctx context.Context, id string) (*models.PGLiveInf
 	liveCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	info := &models.PGLiveInfo{}
 
@@ -129,11 +133,15 @@ func (s *Store) GetVacuumStats(ctx context.Context, id string) ([]models.VacuumS
 	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT
@@ -182,11 +190,15 @@ func (s *Store) GetIndexUsage(ctx context.Context, id string) ([]models.IndexUsa
 	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT
@@ -232,11 +244,15 @@ func (s *Store) GetSlowQueries(ctx context.Context, id string) ([]models.SlowQue
 	liveCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	// PG 13+ uses total_exec_time; PG 10–12 uses total_time
 	const qNew = `
@@ -448,11 +464,15 @@ func (s *Store) GetActiveQueries(ctx context.Context, id string) ([]models.Activ
 	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT pid,
@@ -518,11 +538,15 @@ func (s *Store) GetTableSizes(ctx context.Context, id string) ([]models.TableSiz
 	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT
@@ -565,11 +589,15 @@ func (s *Store) GetPGReplication(ctx context.Context, id string) ([]models.PGRep
 	liveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := pgx.Connect(liveCtx, t.DSN)
+	pool, err := s.getPGTargetPool(liveCtx, t.ID, t.DSN)
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(liveCtx)
+	conn, err := pool.Acquire(liveCtx)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Release()
 
 	rows, err := conn.Query(liveCtx, `
 		SELECT

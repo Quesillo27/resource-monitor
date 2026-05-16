@@ -31,7 +31,7 @@ func (s *Store) GenerateInsights(ctx context.Context, targetID string) ([]Insigh
 	}
 
 	// Toma hasta 200 samples (~3.3 horas a 60s o ~16h a 5min)
-	samples, err := s.GetDatabaseMetrics(ctx, targetID, 200)
+	samples, err := s.GetDatabaseMetrics(ctx, targetID, 200, nil)
 	if err != nil {
 		return nil, err
 	}

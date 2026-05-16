@@ -110,9 +110,20 @@ func (s *Server) deleteDBTarget(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getDBMetrics(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	limitStr := r.URL.Query().Get("limit")
-	limit, _ := strconv.Atoi(limitStr)
-	samples, err := s.store.GetDatabaseMetrics(r.Context(), id, limit)
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	// Filtros temporales: minutes=N (atajo) o since=RFC3339 (preciso).
+	// El cliente usa minutes para alinear con el rango seleccionado del panel.
+	var since *time.Time
+	if mins, _ := strconv.Atoi(q.Get("minutes")); mins > 0 {
+		t := time.Now().Add(-time.Duration(mins) * time.Minute)
+		since = &t
+	} else if sinceStr := q.Get("since"); sinceStr != "" {
+		if t, err := time.Parse(time.RFC3339, sinceStr); err == nil {
+			since = &t
+		}
+	}
+	samples, err := s.store.GetDatabaseMetrics(r.Context(), id, limit, since)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

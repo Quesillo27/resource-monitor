@@ -2377,7 +2377,10 @@ function TrendsPanel({ samples, isPG }) {
 
 function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
   const { data, loading, reload, lastUpdated } = useLoad(
-    () => api.get(`/api/db-targets/${target.id}/metrics?limit=360`),
+    // Tope 6h de historia: cubre los rangos del panel (15m/1h/3h) con margen
+    // para "Todo". minutes=360 hace que el backend filtre por captured_at; limit
+    // es el techo duro por si el poll es muy rápido (≤30s).
+    () => api.get(`/api/db-targets/${target.id}/metrics?minutes=360&limit=720`),
     [target.id],
     DB_REFRESH_MS,
   );

@@ -27,6 +27,10 @@ var ErrInvalidEnrollmentToken = errors.New("invalid enrollment token")
 type Store struct {
 	pool *pgxpool.Pool
 
+	// Pools dedicados por DB target: amortiza handshakes en endpoints live.
+	dbTargetPools   map[string]*pgxpool.Pool
+	dbTargetPoolsMu sync.RWMutex
+
 	// Schema migration once-guards: DDL runs exactly once at startup, never on hot paths.
 	onceV3Schema           sync.Once
 	onceV3SchemaErr        error
@@ -77,7 +81,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	store := &Store{pool: pool}
+	store := &Store{pool: pool, dbTargetPools: make(map[string]*pgxpool.Pool)}
 	// Run all schema migrations sequentially at startup so hot paths never run DDL.
 	for _, migrate := range []func(context.Context) error{
 		store.ensureRuntimeSchema,
@@ -98,6 +102,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 }
 
 func (s *Store) Close() {
+	s.closeAllTargetPools()
 	s.pool.Close()
 }
 

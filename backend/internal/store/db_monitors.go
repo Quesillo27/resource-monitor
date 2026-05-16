@@ -254,6 +254,9 @@ func (s *Store) UpdateDatabaseTarget(ctx context.Context, id string, t models.Da
 	if tag.RowsAffected() == 0 {
 		return models.DatabaseTarget{}, ErrNotFound
 	}
+	// DSN puede haber cambiado — invalidar pool dedicado para que la próxima
+	// request live recree con las credenciales nuevas.
+	s.invalidateTargetPool(id)
 	return s.GetDatabaseTarget(ctx, id)
 }
 
@@ -268,17 +271,25 @@ func (s *Store) DeleteDatabaseTarget(ctx context.Context, id string) error {
 	if tag.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	s.invalidateTargetPool(id)
 	return nil
 }
 
-func (s *Store) GetDatabaseMetrics(ctx context.Context, targetID string, limit int) ([]models.DatabaseSample, error) {
+func (s *Store) GetDatabaseMetrics(ctx context.Context, targetID string, limit int, since *time.Time) ([]models.DatabaseSample, error) {
 	if err := s.ensureDBMonitorSchema(ctx); err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > 200 {
+	// Tope ampliado: con poll de 60s, 2000 samples = ~33h de historia.
+	// Permite que el frontend pida rangos largos (3h, 6h, día) sin recortes silenciosos.
+	if limit <= 0 {
 		limit = 60
 	}
-	rows, err := s.pool.Query(ctx, `
+	if limit > 2000 {
+		limit = 2000
+	}
+	// Filtrado opcional por captured_at >= since. El cliente lo usa para pedir
+	// solo lo necesario al rango activo y mantener payload chico.
+	query := `
 		SELECT id, target_id::text, captured_at, ok, error_message,
 		       connections_active, connections_idle, connections_waiting, connections_total,
 		       db_size_bytes, slow_queries, active_locks, cache_hit_ratio,
@@ -289,9 +300,16 @@ func (s *Store) GetDatabaseMetrics(ctx context.Context, targetID string, limit i
 		       tuples_returned, tuples_fetched, tuples_inserted, tuples_updated, tuples_deleted,
 		       wal_bytes, xid_age, blks_read, blks_hit, max_connections,
 		       slow_query_p50_ms, slow_query_p95_ms, slow_query_p99_ms
-		FROM db_samples WHERE target_id = $1
-		ORDER BY captured_at DESC LIMIT $2
-	`, targetID, limit)
+		FROM db_samples WHERE target_id = $1`
+	args := []any{targetID}
+	if since != nil {
+		query += ` AND captured_at >= $2 ORDER BY captured_at DESC LIMIT $3`
+		args = append(args, *since, limit)
+	} else {
+		query += ` ORDER BY captured_at DESC LIMIT $2`
+		args = append(args, limit)
+	}
+	rows, err := s.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,7 +444,7 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 			sample.CapturedAt = time.Now()
 
 			// Cargar el sample anterior antes de insertar (para deltas en alertas)
-			prevSamples, _ := s.GetDatabaseMetrics(ctx, pt.id, 1)
+			prevSamples, _ := s.GetDatabaseMetrics(ctx, pt.id, 1, nil)
 			var prev *models.DatabaseSample
 			if len(prevSamples) > 0 {
 				prev = &prevSamples[0]
