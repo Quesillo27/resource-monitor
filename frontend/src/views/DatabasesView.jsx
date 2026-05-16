@@ -346,6 +346,52 @@ function MetricsCard({ target, sample }) {
               {Number(sample.transactions_rolled_back).toLocaleString()}
             </strong></div>
         )}
+        {sample._tps != null && (
+          <div className="db-metric-tile"><span>TPS</span>
+            <strong>{round(sample._tps)}/s</strong></div>
+        )}
+        {sample._conn_pct != null && (
+          <div className="db-metric-tile" title={`Total: ${sample.connections_total} de ${sample.max_connections}`}>
+            <span>% Pool</span>
+            <strong style={{ color: sample._conn_pct > 85 ? 'var(--red)' : sample._conn_pct > 70 ? 'var(--amber)' : undefined }}>
+              {Math.round(sample._conn_pct)}%
+            </strong>
+          </div>
+        )}
+        {sample.slow_query_p95_ms != null && (
+          <div className="db-metric-tile" title="Percentil 95 de mean_exec_time en pg_stat_statements">
+            <span>Latencia p95</span>
+            <strong>{round(sample.slow_query_p95_ms)} ms</strong>
+          </div>
+        )}
+        {sample.deadlocks != null && (
+          <div className="db-metric-tile" title="Deadlocks acumulados desde el ultimo reset de pg_stat_database">
+            <span>Deadlocks</span>
+            <strong style={{ color: sample.deadlocks > 0 ? 'var(--red)' : undefined }}>
+              {Number(sample.deadlocks).toLocaleString()}
+            </strong>
+          </div>
+        )}
+        {sample.temp_bytes != null && sample.temp_bytes > 0 && (
+          <div className="db-metric-tile" title="Bytes temporales totales (queries que tocan disco)">
+            <span>Temp bytes</span>
+            <strong>{bytes(sample.temp_bytes)}</strong>
+          </div>
+        )}
+        {sample.xid_age != null && (
+          <div className="db-metric-tile" title="Edad de la transaccion mas vieja (max global). El wraparound ocurre cerca de 2.1B">
+            <span>XID age</span>
+            <strong style={{ color: xidColor(sample.xid_age) }}>
+              {Number(sample.xid_age).toLocaleString()}
+            </strong>
+          </div>
+        )}
+        {sample.wal_bytes != null && (
+          <div className="db-metric-tile" title="WAL bytes acumulados desde el startup del servidor">
+            <span>WAL total</span>
+            <strong>{bytes(sample.wal_bytes)}</strong>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1357,7 +1403,10 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
                           <th title="Total de conexiones abiertas al momento del poll">Conexiones</th>
                           <th title="Tamaño total de la base de datos">Tamaño BD</th>
                           <th title="% de bloques leídos desde caché (ideal: >95%)">Cache hit</th>
+                          <th title="Transacciones por segundo derivado entre samples">TPS</th>
+                          <th title="Percentil 95 de mean_exec_time en pg_stat_statements">p95 (ms)</th>
                           <th title="Queries activas con duración >5s al momento del poll">Queries lentas</th>
+                          <th title="Deadlocks acumulados desde el reset de pg_stat_database">Deadlocks</th>
                           <th title="Locks en espera (waiting)">Locks wait</th>
                         </>
                       ) : (
@@ -1394,8 +1443,17 @@ function TargetDetail({ api, target, onEdit, onDelete, onBack }) {
                                 ? `${Math.round(s.cache_hit_ratio * 100)}%`
                                 : <span className="db-na">—</span>}
                             </td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {s._tps != null ? round(s._tps) : <span className="db-na">—</span>}
+                            </td>
+                            <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {s.slow_query_p95_ms != null ? round(s.slow_query_p95_ms) : <span className="db-na">—</span>}
+                            </td>
                             <td style={{ color: (s.slow_queries ?? 0) > 0 ? '#b91c1c' : '#15803d', fontWeight: (s.slow_queries ?? 0) > 0 ? 700 : undefined }}>
                               {s.slow_queries ?? <span className="db-na">—</span>}
+                            </td>
+                            <td style={{ color: (s.deadlocks ?? 0) > 0 ? '#dc2626' : undefined, fontWeight: (s.deadlocks ?? 0) > 0 ? 700 : undefined }}>
+                              {s.deadlocks != null ? Number(s.deadlocks).toLocaleString() : <span className="db-na">—</span>}
                             </td>
                             <td style={{ color: (s.active_locks ?? 0) > 0 ? '#f59e0b' : undefined }}>
                               {s.active_locks ?? <span className="db-na">—</span>}
