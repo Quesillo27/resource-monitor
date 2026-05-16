@@ -470,16 +470,43 @@ func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
 		sample.DBSizeBytes = &dbSize
 	}
 
-	// Cache hit ratio
-	var blksHit, blksRead *float64
+	// Métricas agregadas de pg_stat_database (cache, tx, tuples, temp, blks, deadlocks) en una sola query
+	var (
+		blksHit, blksRead                                                  int64
+		xactCommit, xactRollback                                           int64
+		tupReturned, tupFetched, tupInserted, tupUpdated, tupDeleted       int64
+		tempFiles, tempBytes, deadlocks                                    int64
+	)
 	if conn.QueryRow(pollCtx, `
-		SELECT sum(blks_hit)::float, sum(blks_read)::float
+		SELECT
+		  COALESCE(blks_hit, 0), COALESCE(blks_read, 0),
+		  COALESCE(xact_commit, 0), COALESCE(xact_rollback, 0),
+		  COALESCE(tup_returned, 0), COALESCE(tup_fetched, 0),
+		  COALESCE(tup_inserted, 0), COALESCE(tup_updated, 0), COALESCE(tup_deleted, 0),
+		  COALESCE(temp_files, 0), COALESCE(temp_bytes, 0), COALESCE(deadlocks, 0)
 		FROM pg_stat_database WHERE datname = current_database()
-	`).Scan(&blksHit, &blksRead) == nil && blksHit != nil {
-		if denom := *blksHit + *blksRead; denom > 0 {
-			ratio := *blksHit / denom
+	`).Scan(
+		&blksHit, &blksRead,
+		&xactCommit, &xactRollback,
+		&tupReturned, &tupFetched, &tupInserted, &tupUpdated, &tupDeleted,
+		&tempFiles, &tempBytes, &deadlocks,
+	) == nil {
+		if denom := blksHit + blksRead; denom > 0 {
+			ratio := float64(blksHit) / float64(denom)
 			sample.CacheHitRatio = &ratio
 		}
+		sample.BlksHit = &blksHit
+		sample.BlksRead = &blksRead
+		sample.TransactionsCommitted = &xactCommit
+		sample.TransactionsRolledBack = &xactRollback
+		sample.TuplesReturned = &tupReturned
+		sample.TuplesFetched = &tupFetched
+		sample.TuplesInserted = &tupInserted
+		sample.TuplesUpdated = &tupUpdated
+		sample.TuplesDeleted = &tupDeleted
+		sample.TempFiles = &tempFiles
+		sample.TempBytes = &tempBytes
+		sample.Deadlocks = &deadlocks
 	}
 
 	// Ungranted locks
@@ -500,13 +527,22 @@ func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
 		sample.SlowQueries = &slow
 	}
 
-	// Transaction counters
-	var xactCommit, xactRollback int64
-	if conn.QueryRow(pollCtx, `
-		SELECT xact_commit, xact_rollback FROM pg_stat_database WHERE datname = current_database()
-	`).Scan(&xactCommit, &xactRollback) == nil {
-		sample.TransactionsCommitted = &xactCommit
-		sample.TransactionsRolledBack = &xactRollback
+	// max_connections (para derivar % de uso vs pool)
+	var maxConn int
+	if conn.QueryRow(pollCtx, `SELECT setting::int FROM pg_settings WHERE name = 'max_connections'`).Scan(&maxConn) == nil {
+		sample.MaxConnections = &maxConn
+	}
+
+	// Backend xid age (alertas predictivas wraparound — max global)
+	var xidAge int64
+	if conn.QueryRow(pollCtx, `SELECT max(age(datfrozenxid))::bigint FROM pg_database`).Scan(&xidAge) == nil {
+		sample.XidAge = &xidAge
+	}
+
+	// WAL bytes acumulados (contador absoluto desde startup; usar diff entre samples para tasa)
+	var walBytes int64
+	if conn.QueryRow(pollCtx, `SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '0/0')::bigint`).Scan(&walBytes) == nil {
+		sample.WalBytes = &walBytes
 	}
 
 	return sample
