@@ -517,3 +517,82 @@ type PGReplicaInfo struct {
 	SentLagKB   int64  `json:"sent_lag_kb"`
 	ApplyLagKB  int64  `json:"apply_lag_kb"`
 }
+
+// ── DB Host Agent ────────────────────────────────────────────────────────────
+// Agente liviano que corre en el mismo host que la BD y reporta metricas que el
+// polling remoto no puede ver: FS del datadir, OOM kills, tail del log,
+// disk I/O del mount del datadir, CPU/RAM del proceso PG.
+// Pertenece a un db_target, NO se lista en "Equipos".
+
+type DBHostAgent struct {
+	ID             string     `json:"id"`
+	DBTargetID     string     `json:"db_target_id"`
+	Hostname       string     `json:"hostname"`
+	OS             string     `json:"os"`
+	Arch           string     `json:"arch"`
+	Engine         string     `json:"engine"`
+	EngineVersion  string     `json:"engine_version,omitempty"`
+	AgentVersion   string     `json:"agent_version"`
+	LastSeenAt     *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	Status         string     `json:"status"` // online|offline (derivado)
+}
+
+type DBHostLogEvent struct {
+	Timestamp time.Time `json:"ts"`
+	Level     string    `json:"level"`   // FATAL, PANIC, WARNING, ERROR, INFO
+	Pattern   string    `json:"pattern"` // qué regex matcheó
+	Message   string    `json:"message"`
+}
+
+type DBHostSample struct {
+	ID             int64            `json:"id"`
+	DBHostAgentID  string           `json:"db_host_agent_id"`
+	CapturedAt     time.Time        `json:"captured_at"`
+	OK             bool             `json:"ok"`
+	ErrorMessage   string           `json:"error_message,omitempty"`
+	FSUsedPct      *float64         `json:"fs_used_pct,omitempty"`
+	FSFreeBytes    *int64           `json:"fs_free_bytes,omitempty"`
+	FSTotalBytes   *int64           `json:"fs_total_bytes,omitempty"`
+	IOReadOps      *int64           `json:"io_read_ops,omitempty"`
+	IOWriteOps     *int64           `json:"io_write_ops,omitempty"`
+	IOReadBytes    *int64           `json:"io_read_bytes,omitempty"`
+	IOWriteBytes   *int64           `json:"io_write_bytes,omitempty"`
+	WalLatencyMs   *float64         `json:"wal_latency_ms,omitempty"`
+	OOMKillsDelta  *int             `json:"oom_kills_delta,omitempty"`
+	PGCPUPct       *float64         `json:"pg_cpu_pct,omitempty"`
+	PGRSSBytes     *int64           `json:"pg_rss_bytes,omitempty"`
+	PGFDUsed       *int             `json:"pg_fd_used,omitempty"`
+	PGFDLimit      *int             `json:"pg_fd_limit,omitempty"`
+	PGUptimeSec    *int64           `json:"pg_uptime_seconds,omitempty"`
+	LogEvents      []DBHostLogEvent `json:"log_events,omitempty"`
+}
+
+type DBHostEnrollmentResult struct {
+	Token          string `json:"token"`
+	ExpiresAt      string `json:"expires_at"`
+	InstallCommand string `json:"install_command"`
+}
+
+type DBHostRegisterRequest struct {
+	EnrollmentToken string `json:"enrollment_token"`
+	Hostname        string `json:"hostname"`
+	OS              string `json:"os"`
+	Arch            string `json:"arch"`
+	Engine          string `json:"engine"`
+	EngineVersion   string `json:"engine_version,omitempty"`
+	AgentVersion    string `json:"agent_version,omitempty"`
+}
+
+type DBHostRegisterResponse struct {
+	HostAgentID string `json:"host_agent_id"`
+	DBTargetID  string `json:"db_target_id"`
+	Credential  string `json:"credential"`
+}
+
+type DBHostHeartbeatRequest struct {
+	AgentVersion  string         `json:"agent_version,omitempty"`
+	EngineVersion string         `json:"engine_version,omitempty"`
+	Sample        DBHostSample   `json:"sample"`
+	DBSample      *DatabaseSample `json:"db_sample,omitempty"` // metricas BD recolectadas localmente
+}

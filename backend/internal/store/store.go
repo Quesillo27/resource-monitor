@@ -46,6 +46,8 @@ type Store struct {
 	onceNetworkIfaceErr    error
 	onceDBMonitor          sync.Once
 	onceDBMonitorErr       error
+	onceDBHostAgent        sync.Once
+	onceDBHostAgentErr     error
 }
 
 type User struct {
@@ -92,6 +94,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		store.ensureAlertContextSchema,
 		store.ensureNetworkInterfaceSchema,
 		store.ensureDBMonitorSchema,
+		store.ensureDBHostAgentSchema,
 	} {
 		if err := migrate(ctx); err != nil {
 			pool.Close()

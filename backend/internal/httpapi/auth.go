@@ -16,6 +16,7 @@ type userIDKey struct{}
 type usernameKey struct{}
 type userRoleKey struct{}
 type agentIDKey struct{}
+type dbHostAgentIDKey struct{}
 
 type claims struct {
 	UserID   string `json:"uid"`
@@ -125,6 +126,27 @@ func (s *Server) requireAgent(next http.Handler) http.Handler {
 			return
 		}
 		ctx := context.WithValue(r.Context(), agentIDKey{}, agentID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func (s *Server) requireDBHostAgent(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw := bearerToken(r)
+		if raw == "" {
+			writeError(w, http.StatusUnauthorized, "missing db host agent credential")
+			return
+		}
+		id, err := s.store.AuthenticateDBHostAgent(r.Context(), raw)
+		if errors.Is(err, store.ErrUnauthorized) {
+			writeError(w, http.StatusUnauthorized, "invalid db host agent credential")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "db host agent auth failed")
+			return
+		}
+		ctx := context.WithValue(r.Context(), dbHostAgentIDKey{}, id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

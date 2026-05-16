@@ -149,9 +149,15 @@ func (s *Server) Routes() http.Handler {
 			r.Get("/db-targets/{id}/autovacuum", s.getDBAutovacuum)
 			r.Get("/db-targets/{id}/replication", s.getDBReplication)
 			r.With(s.requireRole("admin", "operator")).Post("/db-targets/poll", s.pollDBTarget)
+
+			// Host agent vinculado al db_target (Fase 1).
+			r.Get("/db-targets/{id}/host", s.getDBHostAgent)
+			r.With(s.requireRole("admin", "operator")).Post("/db-targets/{id}/host-tokens", s.createDBHostToken)
+			r.With(s.requireRole("admin", "operator")).Delete("/db-targets/{id}/host", s.deleteDBHostAgent)
 		})
 
 		r.Post("/agent/register", s.registerAgent)
+		r.Post("/db-host/register", s.registerDBHostAgent)
 		r.Group(func(r chi.Router) {
 			r.Use(s.requireAgent)
 			r.Post("/agent/heartbeat", s.heartbeat)
@@ -159,6 +165,10 @@ func (s *Server) Routes() http.Handler {
 			r.Post("/agent/inventory", s.agentInventory)
 			r.Post("/agent/offline", s.agentOfflineNotice)
 			r.Post("/agent/commands/{id}/result", s.agentCommandResult)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(s.requireDBHostAgent)
+			r.Post("/db-host/heartbeat", s.dbHostHeartbeat)
 		})
 	})
 
