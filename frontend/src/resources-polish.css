@@ -622,6 +622,123 @@
   .drawer-head, .drawer-body, .drawer-foot { padding-left: 16px; padding-right: 16px; }
 }
 
+/* ── Engine dropdown (selector tipo BD en form) ─────────────────────────── */
+.db-engine-dd { position: relative; width: 100%; }
+.db-engine-dd-trigger {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 9px 12px;
+  background: white; border: 1px solid #cbd5e1; border-radius: 7px;
+  font-size: 14px; font-weight: 600; color: #0f172a; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s;
+}
+.db-engine-dd-trigger:hover { border-color: #94a3b8; }
+.db-engine-dd-trigger:focus-visible {
+  outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, .12);
+}
+.db-engine-dd-label { flex: 1; text-align: left; }
+.db-engine-dd-version {
+  font-size: 11px; font-weight: 600; color: #64748b;
+  background: #f1f5f9; padding: 2px 7px; border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.db-engine-dd-caret { color: #64748b; font-size: 9px; }
+
+.db-engine-dd-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  background: white; border: 1px solid #cbd5e1; border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
+  list-style: none; margin: 0; padding: 4px;
+  max-height: 280px; overflow-y: auto;
+}
+.db-engine-dd-opt {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 8px 10px; border: 0; border-radius: 5px;
+  background: transparent; cursor: pointer; text-align: left;
+  font-size: 13px; color: #0f172a; transition: background .12s;
+}
+.db-engine-dd-opt:hover { background: #f8fafc; }
+.db-engine-dd-opt.active { background: #eff6ff; color: #1e40af; }
+.db-engine-dd-opt-name { flex: 1; font-weight: 600; }
+.db-engine-dd-opt-ver {
+  font-size: 11px; color: #64748b; font-variant-numeric: tabular-nums;
+}
+
+/* ── Engine info card (versiones + métricas monitoreadas) ────────────── */
+.db-engine-info {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #94a3b8;
+  border-radius: 7px;
+  padding: 11px 13px;
+  display: flex; flex-direction: column; gap: 7px;
+}
+.db-engine-info-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.db-engine-info-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 14px; color: #0f172a;
+}
+.db-engine-info-title strong { font-weight: 700; }
+.db-engine-info-versions {
+  display: flex; gap: 12px; font-size: 11px; color: #475569;
+}
+.db-engine-info-versions b { color: #0f172a; font-weight: 600; }
+.db-engine-info-hint {
+  font-size: 12px; color: #64748b; line-height: 1.45;
+  font-style: italic;
+}
+.db-engine-info-metrics {
+  margin-top: 2px;
+}
+.db-engine-info-metrics summary {
+  cursor: pointer; font-size: 12px; font-weight: 600; color: #475569;
+  padding: 4px 0; user-select: none;
+}
+.db-engine-info-metrics summary:hover { color: #0f172a; }
+.db-engine-info-metrics ul {
+  margin: 6px 0 0; padding: 0 0 0 18px; list-style: disc;
+  font-size: 12px; color: #475569; line-height: 1.6;
+}
+.db-engine-info-metrics li::marker { color: #94a3b8; }
+
+/* ── Profile selector (3 cards) ────────────────────────────────────────── */
+.db-profile-grid {
+  display: grid; gap: 8px;
+  grid-template-columns: 1fr;
+}
+.db-profile-card {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px; background: white;
+  border: 1px solid #e2e8f0; border-radius: 7px;
+  cursor: pointer; text-align: left;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.db-profile-card:hover { border-color: #cbd5e1; background: #f8fafc; }
+.db-profile-card.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .08);
+}
+.db-profile-name {
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 13px; font-weight: 700; color: #0f172a;
+}
+.db-profile-interval {
+  font-size: 11px; font-weight: 600; color: #64748b;
+  background: #f1f5f9; padding: 2px 7px; border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.db-profile-card.active .db-profile-interval {
+  background: #dbeafe; color: #1e40af;
+}
+.db-profile-desc {
+  font-size: 12px; color: #475569; font-weight: 600;
+}
+.db-profile-detail {
+  font-size: 11px; color: #64748b; line-height: 1.4;
+}
+
 .db-metrics-empty {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--text-muted); padding: 10px 0;

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity, ChevronLeft, Database, Edit3, HelpCircle, Plus,
   Terminal, Trash2, Wifi, WifiOff, Zap,
@@ -30,11 +30,102 @@ function typeIcon(type) {
 const RELATIONAL_TYPES   = ['postgres', 'mysql', 'mariadb', 'sqlite'];
 const KEYVALUE_TYPES     = ['redis'];
 const SUPPORTED_DB_TYPES = [
-  { value: 'postgres', label: 'PostgreSQL', icon: 'PG', tone: 'pg' },
-  { value: 'mysql',    label: 'MySQL',      icon: 'MY', tone: 'my' },
-  { value: 'mariadb',  label: 'MariaDB',    icon: 'MA', tone: 'my' },
-  { value: 'sqlite',   label: 'SQLite',     icon: 'SQ', tone: 'sq' },
-  { value: 'redis',    label: 'Redis',      icon: 'R',  tone: 'rd' },
+  {
+    value: 'postgres', label: 'PostgreSQL', icon: 'PG', tone: 'pg',
+    minVersion: '13',  recommended: '14+',
+    versionsHint: 'Versiones 10-12 funcionan con métricas reducidas (sin percentiles p50/p95/p99). Para 13+ se requiere extensión pg_stat_statements habilitada.',
+    metrics: [
+      'Conexiones activas/idle/waiting',
+      'Tamaño de la BD y de cada tabla/índice',
+      'Cache hit ratio (shared buffers)',
+      'TPS (commits + rollbacks/s)',
+      'Queries lentas activas + p50/p95/p99 históricos',
+      'Deadlocks, locks en espera, locks bloqueantes',
+      'Tuple stats (insert/update/delete/return)',
+      'Temp files, WAL bytes, XID wraparound',
+      'Replicación (lag, slots, estado)',
+      'Tablas, índices y uso (índices sin scans)',
+    ],
+  },
+  {
+    value: 'mysql', label: 'MySQL', icon: 'MY', tone: 'my',
+    minVersion: '5.6', recommended: '8.0+',
+    versionsHint: 'Requiere usuario con privilegio PROCESS para Threads_*/Innodb_*. Para replicación: REPLICATION CLIENT.',
+    metrics: [
+      'Conexiones (Threads_connected/running) + max_connections',
+      'TPS (Com_commit + Com_rollback)',
+      'InnoDB buffer pool hit ratio',
+      'InnoDB rows read/insert/update/delete',
+      'Created_tmp_disk_tables (presión de queries pesadas)',
+      'Slow_queries (contador del slow log)',
+      'Innodb_row_lock_current_waits',
+      'Tamaño total de la BD',
+    ],
+  },
+  {
+    value: 'mariadb', label: 'MariaDB', icon: 'MA', tone: 'my',
+    minVersion: '10.0', recommended: '10.6+',
+    versionsHint: 'Compatible con todas las queries de MySQL — usa el mismo driver y los mismos counters Innodb_*. Probado contra MariaDB 10.x.',
+    metrics: [
+      'Conexiones + max_connections',
+      'TPS (commits/rollbacks)',
+      'InnoDB buffer pool hit ratio',
+      'InnoDB rows insert/update/delete/read',
+      'Tmp tables a disco, slow queries',
+      'Row locks en espera',
+      'Tamaño total de la BD',
+    ],
+  },
+  {
+    value: 'sqlite', label: 'SQLite', icon: 'SQ', tone: 'sq',
+    minVersion: '3.x', recommended: 'cualquiera',
+    versionsHint: 'El archivo .db debe estar accesible al backend (montado vía volumen Docker). Lectura en modo read-only para no contaminar el WAL del target.',
+    metrics: [
+      'Tamaño en disco (archivo + WAL + SHM)',
+      'Tamaño lógico (page_count × page_size)',
+      'Free pages (PRAGMA freelist_count)',
+      'Conteo de tablas',
+      'Estado de conexión (ping)',
+    ],
+  },
+  {
+    value: 'redis', label: 'Redis', icon: 'R', tone: 'rd',
+    minVersion: '4.0', recommended: '6+',
+    versionsHint: 'MEMORY STATS requiere Redis 4.0+. En 2.x/3.x ese panel queda vacío pero el resto de métricas funcionan. Compatible con RESP2 y RESP3.',
+    metrics: [
+      'Memoria usada vs maxmemory',
+      'Clientes conectados + lista detallada',
+      'Ops/s, hit/miss ratio del keyspace',
+      'SLOWLOG con duraciones y comandos',
+      'CLIENT LIST (addr, idle, comando, flags)',
+      'MEMORY STATS (frag ratio, overhead, buffers)',
+      'Keys count por DB',
+    ],
+  },
+];
+
+const MONITORING_PROFILES = [
+  {
+    value: 'basic',
+    label: 'Básico',
+    description: 'Solo conexión + tamaño de BD',
+    detail: 'Mínimo impacto en el target. Útil para BDs muy cargadas o monitoreo agregado.',
+    interval: 120,
+  },
+  {
+    value: 'standard',
+    label: 'Estándar',
+    description: 'Métricas operativas (recomendado)',
+    detail: 'Conexiones, cache hit, TPS, slow queries, tamaño. Balance entre cobertura y costo.',
+    interval: 60,
+  },
+  {
+    value: 'full',
+    label: 'Completo',
+    description: 'Análisis live + diagnóstico',
+    detail: 'Todo lo anterior + locks bloqueantes, tuple stats, percentiles, replicación. Mayor frecuencia de polling.',
+    interval: 30,
+  },
 ];
 
 function isRelational(type) { return RELATIONAL_TYPES.includes(type); }
@@ -1578,7 +1669,97 @@ function ReplicationPanel({ api, targetId }) {
 
 // ── TargetModal (con test de conexión) ────────────────────────────────────────
 
-const EMPTY = { name: '', type: 'postgres', dsn: '', params: {}, enabled: true, poll_interval_seconds: 60 };
+function EngineDropdown({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const current = SUPPORTED_DB_TYPES.find(t => t.value === value) || SUPPORTED_DB_TYPES[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const onKey   = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="db-engine-dd" ref={ref}>
+      <button type="button" className="db-engine-dd-trigger"
+        onClick={() => setOpen(o => !o)} aria-haspopup="listbox" aria-expanded={open}>
+        <span className={`db-type-icon ${current.tone}`}>{current.icon}</span>
+        <span className="db-engine-dd-label">{current.label}</span>
+        <span className="db-engine-dd-version">v{current.minVersion}+</span>
+        <span className="db-engine-dd-caret" aria-hidden>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <ul className="db-engine-dd-menu" role="listbox">
+          {SUPPORTED_DB_TYPES.map(t => (
+            <li key={t.value} role="option" aria-selected={t.value === value}>
+              <button type="button"
+                className={`db-engine-dd-opt${t.value === value ? ' active' : ''}`}
+                onClick={() => { onChange(t.value); setOpen(false); }}>
+                <span className={`db-type-icon ${t.tone}`}>{t.icon}</span>
+                <span className="db-engine-dd-opt-name">{t.label}</span>
+                <span className="db-engine-dd-opt-ver">v{t.minVersion}+</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function EngineInfoCard({ type }) {
+  const cfg = SUPPORTED_DB_TYPES.find(t => t.value === type);
+  if (!cfg) return null;
+  return (
+    <div className="db-engine-info" style={{ borderLeftColor: dbTypeColor(type) }}>
+      <div className="db-engine-info-head">
+        <div className="db-engine-info-title">
+          <span className={`db-type-icon ${cfg.tone}`}>{cfg.icon}</span>
+          <strong>{cfg.label}</strong>
+        </div>
+        <div className="db-engine-info-versions">
+          <span><b>Versión mínima:</b> {cfg.minVersion}</span>
+          <span><b>Recomendado:</b> {cfg.recommended}</span>
+        </div>
+      </div>
+      <div className="db-engine-info-hint">{cfg.versionsHint}</div>
+      <details className="db-engine-info-metrics">
+        <summary>Métricas que se monitorean ({cfg.metrics.length})</summary>
+        <ul>
+          {cfg.metrics.map((m, i) => <li key={i}>{m}</li>)}
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function ProfileSelector({ value, onChange }) {
+  return (
+    <div className="db-profile-grid">
+      {MONITORING_PROFILES.map(p => (
+        <button key={p.value} type="button"
+          className={`db-profile-card${value === p.value ? ' active' : ''}`}
+          onClick={() => onChange(p.value)}>
+          <div className="db-profile-name">
+            {p.label}
+            <span className="db-profile-interval">{p.interval}s</span>
+          </div>
+          <div className="db-profile-desc">{p.description}</div>
+          <div className="db-profile-detail">{p.detail}</div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const EMPTY = { name: '', type: 'postgres', dsn: '', params: { profile: 'standard' }, enabled: true, poll_interval_seconds: 60 };
 
 function TargetModal({ api, initial, onSave, onClose, saving, error }) {
   const [form, setForm]       = useState(initial || EMPTY);
@@ -1622,15 +1803,20 @@ function TargetModal({ api, initial, onSave, onClose, saving, error }) {
 
         <div className="db-form-field">
           <span className="db-form-label">Tipo de base de datos</span>
-          <div className="db-type-selector">
-            {SUPPORTED_DB_TYPES.map(t => (
-              <button key={t.value} type="button"
-                className={`db-type-btn${form.type === t.value ? ` active-${t.tone}` : ''}`}
-                onClick={() => set('type', t.value)}>
-                <span className={`db-type-icon ${t.tone}`}>{t.icon}</span>{t.label}
-              </button>
-            ))}
-          </div>
+          <EngineDropdown value={form.type} onChange={(v) => set('type', v)}/>
+        </div>
+
+        <EngineInfoCard type={form.type}/>
+
+        <div className="db-form-field">
+          <span className="db-form-label">Perfil de monitoreo</span>
+          <ProfileSelector
+            value={form.params?.profile || 'standard'}
+            onChange={(p) => {
+              setParam('profile', p);
+              const cfg = MONITORING_PROFILES.find(x => x.value === p);
+              if (cfg) set('poll_interval_seconds', cfg.interval);
+            }}/>
         </div>
 
         <div className="db-form-field">
