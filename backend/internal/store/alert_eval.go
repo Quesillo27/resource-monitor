@@ -56,11 +56,14 @@ func (s *Store) effectiveAlertRules(ctx context.Context, tx pgx.Tx, agentID stri
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(custom_rules_enabled, false) FROM agents WHERE id = $1`, agentID).Scan(&customEnabled); err != nil {
 		customEnabled = false
 	}
+	// Con custom_rules_enabled=true el agente queda en "modo personalizado": solo aplican
+	// las reglas con agent_id = $1. Las globales NO se heredan ni como fallback (incluso si
+	// la regla custom está enabled=false, ese off es voluntad explícita del usuario).
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, COALESCE(agent_id::text, ''), metric, resource_key, severity, enabled, threshold,
 		       duration_samples, notify_email, notify_telegram, cooldown_minutes, description
 		FROM alert_rules
-		WHERE agent_id IS NULL OR ($2 AND agent_id = $1)
+		WHERE ($2 AND agent_id = $1) OR (NOT $2 AND agent_id IS NULL)
 		ORDER BY agent_id NULLS FIRST, metric, resource_key, severity
 	`, agentID, customEnabled)
 	if err != nil {
