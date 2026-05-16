@@ -421,6 +421,13 @@ func (s *Store) PollAllDatabaseTargets(ctx context.Context) {
 		wg.Add(1)
 		go func(pt pollTarget) {
 			defer wg.Done()
+			// F3: si hay un host agent local reportando hace <180s, ese agente
+			// se hace cargo del polling de la BD; el manager skip para evitar
+			// duplicar conexiones. Cuando el agente cae (last_seen viejo) el
+			// polling remoto se reactiva automaticamente.
+			if active, err := s.HasActiveDBHostAgent(ctx, pt.id); err == nil && active {
+				return
+			}
 			var sample models.DatabaseSample
 			profile := pt.params["profile"]
 			if profile == "" {
