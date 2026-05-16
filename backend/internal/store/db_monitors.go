@@ -545,6 +545,25 @@ func collectPostgresDB(ctx context.Context, dsn string) models.DatabaseSample {
 		sample.WalBytes = &walBytes
 	}
 
+	// Slow query percentiles via pg_stat_statements (si la extension esta disponible en este target)
+	var hasStatStatements bool
+	if conn.QueryRow(pollCtx, `SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')`).Scan(&hasStatStatements) == nil && hasStatStatements {
+		var p50, p95, p99 *float64
+		if conn.QueryRow(pollCtx, `
+			SELECT
+			  percentile_disc(0.5) WITHIN GROUP (ORDER BY mean_exec_time)::float8,
+			  percentile_disc(0.95) WITHIN GROUP (ORDER BY mean_exec_time)::float8,
+			  percentile_disc(0.99) WITHIN GROUP (ORDER BY mean_exec_time)::float8
+			FROM pg_stat_statements
+			WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
+			  AND calls > 1
+		`).Scan(&p50, &p95, &p99) == nil {
+			sample.SlowQueryP50Ms = p50
+			sample.SlowQueryP95Ms = p95
+			sample.SlowQueryP99Ms = p99
+		}
+	}
+
 	return sample
 }
 
