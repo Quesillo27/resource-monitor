@@ -173,13 +173,48 @@ func (s *Store) RegisterDBHostAgent(ctx context.Context, req models.DBHostRegist
 	if _, err := tx.Exec(ctx, `UPDATE db_host_enrollment_tokens SET used_at = now() WHERE id = $1`, tokenID); err != nil {
 		return nil, err
 	}
+
+	// Modo combinado: el mismo host también se registra como agente regular
+	// para que mantenga el monitoreo estándar (CPU/RAM/disco/procesos).
+	// Si ya existe un agent con el mismo hostname, rotamos su credencial
+	// (no es recuperable porque está hasheada); si no, lo creamos nuevo.
+	agentCredential, err := randomToken(32)
+	if err != nil {
+		return nil, err
+	}
+	var agentID string
+	agentErr := tx.QueryRow(ctx, `SELECT id::text FROM agents WHERE hostname = $1 LIMIT 1`, req.Hostname).Scan(&agentID)
+	if agentErr == nil {
+		if _, err = tx.Exec(ctx, `
+			UPDATE agents
+			SET credential_hash=$1, os=$2, arch=$3, agent_version=$4,
+			    last_seen_at=now(), updated_at=now(), status='online'
+			WHERE id=$5
+		`, hashSecret(agentCredential), req.OS, req.Arch, req.AgentVersion, agentID); err != nil {
+			return nil, err
+		}
+	} else if errors.Is(agentErr, pgx.ErrNoRows) {
+		err = tx.QueryRow(ctx, `
+			INSERT INTO agents (name, hostname, os, arch, credential_hash, agent_version, status, primary_ip, last_seen_at)
+			VALUES ($1, $2, $3, $4, $5, $6, 'online', '', now())
+			RETURNING id::text
+		`, req.Hostname, req.Hostname, req.OS, req.Arch, hashSecret(agentCredential), req.AgentVersion).Scan(&agentID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		return nil, agentErr
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
 	return &models.DBHostRegisterResponse{
-		HostAgentID: hostAgentID,
-		DBTargetID:  dbTargetID,
-		Credential:  credential,
+		HostAgentID:     hostAgentID,
+		DBTargetID:      dbTargetID,
+		Credential:      credential,
+		AgentID:         agentID,
+		AgentCredential: agentCredential,
 	}, nil
 }
 

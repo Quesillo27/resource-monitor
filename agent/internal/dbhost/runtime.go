@@ -7,6 +7,7 @@ import (
 
 	"resource-monitor/agent/internal/client"
 	"resource-monitor/agent/internal/config"
+	agentruntime "resource-monitor/agent/internal/runtime"
 	"resource-monitor/agent/internal/version"
 )
 
@@ -39,6 +40,23 @@ func Run(ctx context.Context, cfg config.Config) error {
 
 	api := client.NewWithTLS(cfg.ServerURL, cfg.Credential, cfg.InsecureSkipTLS)
 	state := &State{}
+
+	// Modo combinado: si tenemos credencial del agente regular, lanzamos en
+	// paralelo el runtime estándar para que el host siga apareciendo en
+	// "Equipos" con métricas CPU/RAM/disco/procesos. El runtime regular
+	// usa el mismo ctx, así que se cancela junto con el de dbhost.
+	if cfg.RegularAgentCredential != "" {
+		regCfg := cfg
+		regCfg.AgentID = cfg.RegularAgentID
+		regCfg.Credential = cfg.RegularAgentCredential
+		regCfg.Mode = ""
+		go func() {
+			log.Printf("modo combinado: lanzando runtime regular (agent_id=%s)", regCfg.AgentID)
+			if err := agentruntime.Run(ctx, regCfg); err != nil {
+				log.Printf("runtime regular terminó: %v", err)
+			}
+		}()
+	}
 
 	interval := time.Duration(cfg.IntervalSeconds) * time.Second
 	if interval < 10*time.Second {

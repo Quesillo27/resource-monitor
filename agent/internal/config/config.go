@@ -46,6 +46,14 @@ type Config struct {
 	// DSN para pollear la BD localmente (Unix socket o 127.0.0.1). Si vacío
 	// y mode=db postgres, el colector intenta socket peer-auth.
 	DBLocalDSN string `json:"db_local_dsn,omitempty"`
+
+	// Modo combinado: cuando el agente está en mode=db, además corre el
+	// runtime regular para que el host siga apareciendo en "Equipos" con
+	// métricas estándar (CPU/RAM/disco/procesos). Estas dos referencias
+	// son la identidad del agente regular emparejado, distintas de
+	// AgentID/Credential que en mode=db apuntan al db-host.
+	RegularAgentID         string `json:"regular_agent_id,omitempty"`
+	RegularAgentCredential string `json:"regular_agent_credential,omitempty"`
 }
 
 func Load(path string) (Config, error) {

@@ -132,6 +132,10 @@ type DBHostRegisterResponse struct {
 	HostAgentID string `json:"host_agent_id"`
 	DBTargetID  string `json:"db_target_id"`
 	Credential  string `json:"credential"`
+	// Modo combinado — el host también se registra como agente regular para
+	// mantener monitoreo de equipos (CPU/RAM/disco/procesos) en paralelo.
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentCredential string `json:"agent_credential,omitempty"`
 }
 
 type DBHostLogEvent struct {

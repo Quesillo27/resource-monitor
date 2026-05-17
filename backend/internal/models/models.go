@@ -588,6 +588,12 @@ type DBHostRegisterResponse struct {
 	HostAgentID string `json:"host_agent_id"`
 	DBTargetID  string `json:"db_target_id"`
 	Credential  string `json:"credential"`
+	// Modo combinado: el agente también se registra como agente regular en
+	// `agents` con el mismo hostname, para que el host mantenga su monitoreo
+	// estándar (CPU/RAM/disco/procesos) además del modo db. Estos campos
+	// son la identidad del registro regular.
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentCredential string `json:"agent_credential,omitempty"`
 }
 
 type DBHostHeartbeatRequest struct {

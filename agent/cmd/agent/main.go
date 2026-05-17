@@ -381,6 +381,8 @@ func registerAndSave(cfg *config.Config, path string) error {
 		cfg.HostAgentID = result.HostAgentID
 		cfg.DBTargetID = result.DBTargetID
 		cfg.Credential = result.Credential
+		cfg.RegularAgentID = result.AgentID
+		cfg.RegularAgentCredential = result.AgentCredential
 		cfg.Engine = engine
 		if cfg.DataDir == "" {
 			cfg.DataDir = det.DataDir

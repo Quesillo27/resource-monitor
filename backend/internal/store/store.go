@@ -399,12 +399,6 @@ func (s *Store) DashboardSummary(ctx context.Context, offlineAfterSeconds int) (
 		  FROM agents a
 		  LEFT JOIN latest l ON l.agent_id = a.id
 		  WHERE a.status != 'system'
-		    AND a.hostname NOT IN (
-		      SELECT hostname FROM db_host_agents
-		      WHERE last_seen_at IS NOT NULL
-		        AND last_seen_at > now() - interval '180 seconds'
-		        AND hostname != ''
-		    )
 		), latest_disks AS (
 		  SELECT DISTINCT ON (agent_id, mountpoint) agent_id, mountpoint, used_percent
 		  FROM disk_samples
@@ -499,12 +493,6 @@ func (s *Store) ListAgents(ctx context.Context, offlineAfterSeconds int, search 
 		LEFT JOIN disk_counts dc ON dc.agent_id = a.id
 		LEFT JOIN last_cmd lc ON lc.agent_id = a.id
 		WHERE a.status != 'system'
-		  AND a.hostname NOT IN (
-		    SELECT hostname FROM db_host_agents
-		    WHERE last_seen_at IS NOT NULL
-		      AND last_seen_at > now() - interval '180 seconds'
-		      AND hostname != ''
-		  )
 		  AND ($2 = '' OR a.name ILIKE '%' || $2 || '%' OR a.hostname ILIKE '%' || $2 || '%')
 		  AND ($3 = '' OR $3 = ANY(a.tags))
 		ORDER BY a.last_seen_at DESC NULLS LAST, a.name
