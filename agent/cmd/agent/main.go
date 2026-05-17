@@ -296,6 +296,7 @@ func commonFlags(name string) (*flag.FlagSet, *config.Config) {
 	fs.StringVar(&cfg.Engine, "engine", "", "db engine when --mode=db: postgres | mysql | mongo (empty = auto-detect)")
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "db datadir path (empty = auto-detect from running process)")
 	fs.StringVar(&cfg.LogPath, "log-path", "", "db log file path to tail (empty = auto-detect)")
+	fs.StringVar(&cfg.DBLocalDSN, "db-dsn", "", "DSN para pollear la BD local (ej postgres:///dbname para socket Unix)")
 	return fs, cfg
 }
 

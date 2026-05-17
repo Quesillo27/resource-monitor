@@ -134,9 +134,22 @@ func (s *Server) dbHostHeartbeat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Si el agente envía sample de BD recolectado localmente, lo persistimos
-	// como sample del db_target (mismo flujo que el polling remoto). Falta
-	// resolver target_id a partir del host agent — lo dejo en F3 cuando se
-	// integra con polling.
+	// F6: si el agente envía sample de BD recolectado localmente, lo persistimos
+	// como sample del db_target (mismo flujo que el polling remoto). El manager
+	// hace skip del polling cuando hay host agent activo, asi que sin esto no
+	// llegarian samples DB al historial.
+	if req.DBSample != nil {
+		targetID, err := s.store.GetTargetIDForHostAgent(r.Context(), hostAgentID)
+		if err == nil {
+			req.DBSample.TargetID = targetID
+			if req.DBSample.CapturedAt.IsZero() {
+				req.DBSample.CapturedAt = time.Now()
+			}
+			if err := s.store.InsertDatabaseSampleFromAgent(r.Context(), *req.DBSample); err != nil {
+				// No fallar el heartbeat por esto — solo loguear.
+				_ = err
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

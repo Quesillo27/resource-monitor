@@ -162,10 +162,34 @@ type DBHostSample struct {
 	LogEvents     []DBHostLogEvent `json:"log_events,omitempty"`
 }
 
+// DatabaseSample espeja models.DatabaseSample del backend para que el agente
+// pueda enviar metricas de BD recolectadas localmente (modo "agente toma el
+// control" — el manager skip su polling remoto). Todos los campos son
+// punteros para que el JSON omita los que el motor no provee.
+type DatabaseSample struct {
+	CapturedAt             time.Time `json:"captured_at,omitempty"`
+	OK                     bool      `json:"ok"`
+	ErrorMessage           string    `json:"error_message,omitempty"`
+	ConnectionsActive      *int      `json:"connections_active,omitempty"`
+	ConnectionsIdle        *int      `json:"connections_idle,omitempty"`
+	ConnectionsWaiting     *int      `json:"connections_waiting,omitempty"`
+	ConnectionsTotal       *int      `json:"connections_total,omitempty"`
+	DBSizeBytes            *int64    `json:"db_size_bytes,omitempty"`
+	SlowQueries            *int      `json:"slow_queries,omitempty"`
+	ActiveLocks            *int      `json:"active_locks,omitempty"`
+	CacheHitRatio          *float64  `json:"cache_hit_ratio,omitempty"`
+	TransactionsCommitted  *int64    `json:"transactions_committed,omitempty"`
+	TransactionsRolledBack *int64    `json:"transactions_rolled_back,omitempty"`
+	Deadlocks              *int64    `json:"deadlocks,omitempty"`
+	MaxConnections         *int      `json:"max_connections,omitempty"`
+	SlowQueryP95Ms         *float64  `json:"slow_query_p95_ms,omitempty"`
+}
+
 type DBHostHeartbeatRequest struct {
-	AgentVersion  string       `json:"agent_version,omitempty"`
-	EngineVersion string       `json:"engine_version,omitempty"`
-	Sample        DBHostSample `json:"sample"`
+	AgentVersion  string          `json:"agent_version,omitempty"`
+	EngineVersion string          `json:"engine_version,omitempty"`
+	Sample        DBHostSample    `json:"sample"`
+	DBSample      *DatabaseSample `json:"db_sample,omitempty"`
 }
 
 func (c *Client) RegisterDBHost(ctx context.Context, req DBHostRegisterRequest) (DBHostRegisterResponse, error) {

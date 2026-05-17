@@ -329,6 +329,26 @@ func (s *Store) DeleteDBHostAgent(ctx context.Context, dbTargetID string) error 
 	return nil
 }
 
+// GetTargetIDForHostAgent resuelve el db_target_id de un host agent dado su ID.
+// Se usa en el handler de heartbeat para persistir db_sample bajo el target
+// correcto sin que el agente tenga que mandarlo.
+func (s *Store) GetTargetIDForHostAgent(ctx context.Context, hostAgentID string) (string, error) {
+	var targetID string
+	err := s.pool.QueryRow(ctx,
+		`SELECT db_target_id::text FROM db_host_agents WHERE id = $1`,
+		hostAgentID).Scan(&targetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return targetID, err
+}
+
+// InsertDatabaseSampleFromAgent persiste un sample de BD enviado por un host
+// agent que pollea la BD localmente. Reusa el mismo insert que el polling remoto.
+func (s *Store) InsertDatabaseSampleFromAgent(ctx context.Context, sample models.DatabaseSample) error {
+	return s.insertDBSample(ctx, sample)
+}
+
 // HasActiveDBHostAgent retorna true si el target tiene un host agent que reportó
 // recientemente (< 180s). Se usa para que el polling remoto del manager skip targets
 // monitoreados localmente.

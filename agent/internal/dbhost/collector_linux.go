@@ -334,15 +334,21 @@ func tailLog(path, engine string, st *State) ([]client.DBHostLogEvent, error) {
 			trimmed = trimmed[:400] + "…"
 		}
 		for _, p := range patterns {
-			if p.Regex.MatchString(line) {
-				events = append(events, client.DBHostLogEvent{
-					Timestamp: time.Now(),
-					Level:     p.Level,
-					Pattern:   p.Key,
-					Message:   strings.TrimSpace(trimmed),
-				})
+			if !p.Regex.MatchString(line) {
+				continue
+			}
+			// Filtros post-match (Go RE2 no soporta lookahead). El caso comun
+			// "duplicate key" en PG es ruido aplicativo, no incidente real.
+			if p.Key == "error" && strings.Contains(strings.ToLower(line), "duplicate key") {
 				break
 			}
+			events = append(events, client.DBHostLogEvent{
+				Timestamp: time.Now(),
+				Level:     p.Level,
+				Pattern:   p.Key,
+				Message:   strings.TrimSpace(trimmed),
+			})
+			break
 		}
 		if len(events) >= 20 {
 			break

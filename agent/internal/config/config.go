@@ -43,6 +43,9 @@ type Config struct {
 	EngineVersion string `json:"engine_version,omitempty"`   // detectado o configurado
 	DataDir       string `json:"data_dir,omitempty"`         // path datadir (auto si vacío)
 	LogPath       string `json:"log_path,omitempty"`         // path log PG para tail (auto si vacío)
+	// DSN para pollear la BD localmente (Unix socket o 127.0.0.1). Si vacío
+	// y mode=db postgres, el colector intenta socket peer-auth.
+	DBLocalDSN string `json:"db_local_dsn,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -116,6 +119,9 @@ func LoadWithOverrides(overrides Config) (Config, error) {
 	}
 	if overrides.LogPath != "" {
 		cfg.LogPath = overrides.LogPath
+	}
+	if overrides.DBLocalDSN != "" {
+		cfg.DBLocalDSN = overrides.DBLocalDSN
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = "agent"

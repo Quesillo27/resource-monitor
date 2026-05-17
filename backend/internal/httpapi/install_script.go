@@ -44,6 +44,7 @@ SERVER="__DEFAULT_SERVER__"
 ENGINE=""
 DATA_DIR=""
 LOG_PATH=""
+DB_DSN=""
 INTERVAL="60"
 
 while [ $# -gt 0 ]; do
@@ -58,6 +59,8 @@ while [ $# -gt 0 ]; do
     --data-dir)    DATA_DIR="$2"; shift;;
     --log-path=*)  LOG_PATH="${1#*=}";;
     --log-path)    LOG_PATH="$2"; shift;;
+    --db-dsn=*)    DB_DSN="${1#*=}";;
+    --db-dsn)      DB_DSN="$2"; shift;;
     --interval=*)  INTERVAL="${1#*=}";;
     --interval)    INTERVAL="$2"; shift;;
     *)             echo "argumento desconocido: $1" >&2; exit 2;;
@@ -98,6 +101,7 @@ EXTRA_FLAGS=""
 [ -n "$ENGINE" ]   && EXTRA_FLAGS="$EXTRA_FLAGS --engine=$ENGINE"
 [ -n "$DATA_DIR" ] && EXTRA_FLAGS="$EXTRA_FLAGS --data-dir=$DATA_DIR"
 [ -n "$LOG_PATH" ] && EXTRA_FLAGS="$EXTRA_FLAGS --log-path=$LOG_PATH"
+[ -n "$DB_DSN" ]   && EXTRA_FLAGS="$EXTRA_FLAGS --db-dsn=$DB_DSN"
 
 echo ">> Registrando contra $SERVER"
 "$BIN_PATH" install \
