@@ -25,7 +25,8 @@ var patternsByEngine = map[string][]LogPattern{
 		{Regex: regexp.MustCompile(`(?i)connection refused|too many connections`), Level: "ERROR", Key: "conn_refused"},
 		{Regex: regexp.MustCompile(`(?i)server process .* was terminated by signal`), Level: "FATAL", Key: "backend_killed"},
 		{Regex: regexp.MustCompile(`(?i)\bFATAL:\s+`), Level: "FATAL", Key: "fatal"},
-		{Regex: regexp.MustCompile(`(?i)\bERROR:\s+(?!duplicate key)`), Level: "ERROR", Key: "error"},
+		// Go RE2 no soporta lookahead; "duplicate key" se filtra en tailLog.
+		{Regex: regexp.MustCompile(`(?i)\bERROR:\s+`), Level: "ERROR", Key: "error"},
 	},
 	"mysql": {
 		{Regex: regexp.MustCompile(`(?i)\[ERROR\].*innodb.*cannot allocate`), Level: "FATAL", Key: "oom"},
