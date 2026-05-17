@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"resource-monitor/agent/internal/config"
+	"resource-monitor/agent/internal/dbhost"
 	agentruntime "resource-monitor/agent/internal/runtime"
 
 	"github.com/kardianos/service"
@@ -101,6 +102,12 @@ func (p *program) run(ctx context.Context) {
 	}
 	if cfg.IntervalSeconds < config.MinIntervalSeconds {
 		cfg.IntervalSeconds = config.MinIntervalSeconds
+	}
+	if cfg.Mode == "db" {
+		if err := dbhost.Run(ctx, cfg); err != nil {
+			log.Printf("dbhost runtime exited: %v", err)
+		}
+		return
 	}
 	if err := agentruntime.Run(ctx, cfg); err != nil {
 		log.Printf("agent runtime exited: %v", err)

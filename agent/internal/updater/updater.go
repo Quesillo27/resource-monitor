@@ -231,21 +231,33 @@ func applyUpdate(tempBin, target string) error {
 // spawnWindowsHelper genera un script .cmd que se ejecuta desconectado: tras
 // 3s detiene el servicio, sobreescribe el .exe, lo arranca y se borra a sí
 // mismo. El proceso del agente termina apenas se llama Stop-Service.
+// Cada paso se loguea en %TEMP%\resource-monitor-update.log para diagnosticar
+// fallos silenciosos (helper que arranca pero no logra hacer el swap).
 func spawnWindowsHelper(tempBin, target string) error {
 	helperScript := filepath.Join(os.TempDir(), "resource-monitor-update-helper.cmd")
+	logFile := filepath.Join(os.TempDir(), "resource-monitor-update.log")
 	script := fmt.Sprintf(`@echo off
+set LOG=%s
+echo [%%date%% %%time%%] helper started tempBin=%s target=%s >> "%%LOG%%"
 timeout /t 3 /nobreak > nul
-sc stop "resource-monitor-agent" > nul 2>&1
+echo [%%date%% %%time%%] sc stop... >> "%%LOG%%"
+sc stop "resource-monitor-agent" >> "%%LOG%%" 2>&1
 :waitloop
 sc query "resource-monitor-agent" | find "STOPPED" > nul
 if errorlevel 1 (
     timeout /t 1 /nobreak > nul
     goto waitloop
 )
-move /Y "%s" "%s" > nul
-sc start "resource-monitor-agent" > nul 2>&1
+echo [%%date%% %%time%%] service STOPPED, moving binary >> "%%LOG%%"
+move /Y "%s" "%s" >> "%%LOG%%" 2>&1
+if errorlevel 1 (
+    echo [%%date%% %%time%%] MOVE FAILED — old binary preserved >> "%%LOG%%"
+)
+echo [%%date%% %%time%%] sc start... >> "%%LOG%%"
+sc start "resource-monitor-agent" >> "%%LOG%%" 2>&1
+echo [%%date%% %%time%%] helper done >> "%%LOG%%"
 del "%%~f0"
-`, tempBin, target)
+`, logFile, tempBin, target, tempBin, target)
 	if err := os.WriteFile(helperScript, []byte(script), 0o755); err != nil {
 		return err
 	}

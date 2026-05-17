@@ -385,6 +385,23 @@ var (
 	netSnapshots  = map[string]netSnapshot{}
 )
 
+// isEphemeralIface descarta interfaces de red que típicamente son ruido
+// (loopback) o efímeras de Docker/containers (veth*, br-<hash>, vethXXX@if*).
+// docker0 y docker_gwbridge se conservan porque son estables y reflejan
+// tráfico real del host.
+func isEphemeralIface(name string) bool {
+	if strings.HasPrefix(name, "lo") {
+		return true
+	}
+	if strings.HasPrefix(name, "veth") {
+		return true
+	}
+	if strings.HasPrefix(name, "br-") {
+		return true
+	}
+	return false
+}
+
 func collectNetworks(ctx context.Context) []NetMetric {
 	counters, err := gnet.IOCountersWithContext(ctx, true)
 	if err != nil {
@@ -407,7 +424,7 @@ func collectNetworks(ctx context.Context) []NetMetric {
 
 	result := []NetMetric{}
 	for _, counter := range counters {
-		if strings.HasPrefix(counter.Name, "lo") {
+		if isEphemeralIface(counter.Name) {
 			continue
 		}
 		metric := NetMetric{
